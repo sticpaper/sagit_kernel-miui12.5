@@ -2,6 +2,7 @@
  *  linux/fs/ext4/inode.c
  *
  * Copyright (C) 1992, 1993, 1994, 1995
+ * Copyright (C) 2020 XiaoMi, Inc.
  * Remy Card (card@masi.ibp.fr)
  * Laboratoire MASI - Institut Blaise Pascal
  * Universite Pierre et Marie Curie (Paris VI)
@@ -689,7 +690,12 @@ has_zeroout:
 		    !(map->m_flags & EXT4_MAP_UNWRITTEN) &&
 		    !IS_NOQUOTA(inode) &&
 		    ext4_should_order_data(inode)) {
-			ret = ext4_jbd2_file_inode(handle, inode);
+			loff_t start_byte =
+				(loff_t)map->m_lblk << inode->i_blkbits;
+			loff_t length = (loff_t)map->m_len << inode->i_blkbits;
+
+			ret = ext4_jbd2_file_inode(handle, inode,
+							start_byte, length);
 			if (ret)
 				return ret;
 		}
@@ -3386,20 +3392,15 @@ static ssize_t ext4_direct_IO(struct kiocb *iocb, struct iov_iter *iter,
 	size_t count = iov_iter_count(iter);
 	ssize_t ret;
 
-<<<<<<< HEAD
 	if (iov_iter_rw(iter) == READ) {
 		loff_t size = i_size_read(inode);
 
 		if (offset >= size)
 			return 0;
 	}
-
-#ifdef CONFIG_EXT4_FS_ENCRYPTION
-=======
 #if defined(CONFIG_EXT4_FS_ENCRYPTION) && \
 !defined(CONFIG_EXT4_FS_ICE_ENCRYPTION)
 
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc
 	if (ext4_encrypted_inode(inode) && S_ISREG(inode->i_mode))
 		return 0;
 #endif
@@ -3622,7 +3623,8 @@ static int __ext4_block_zero_page_range(handle_t *handle,
 		err = 0;
 		mark_buffer_dirty(bh);
 		if (ext4_test_inode_state(inode, EXT4_STATE_ORDERED_MODE))
-			err = ext4_jbd2_file_inode(handle, inode);
+			err = ext4_jbd2_file_inode(handle, inode, from,
+							length);
 	}
 
 unlock:

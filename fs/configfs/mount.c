@@ -168,7 +168,6 @@ static void __exit configfs_exit(void)
 
 MODULE_AUTHOR("Oracle");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.0.2");
 MODULE_DESCRIPTION("Simple RAM filesystem for user driven kernel subsystem configuration.");
 
 core_initcall(configfs_init);

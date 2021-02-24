@@ -1142,14 +1142,10 @@ static int ffs_aio_cancel(struct kiocb *kiocb)
 
 	ENTER();
 
-<<<<<<< HEAD
-	spin_lock_irqsave(&epfile->ffs->eps_lock, flags);
-=======
 	ffs_log("enter:state %d setup_state %d flag %lu", epfile->ffs->state,
 		epfile->ffs->setup_state, epfile->ffs->flags);
 
-	spin_lock_irq(&epfile->ffs->eps_lock);
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc
+	spin_lock_irqsave(&epfile->ffs->eps_lock, flags);
 
 	if (likely(io_data && io_data->ep && io_data->req))
 		value = usb_ep_dequeue(io_data->ep, io_data->req);
@@ -1317,7 +1313,7 @@ static long ffs_epfile_ioctl(struct file *file, unsigned code,
 		case FUNCTIONFS_ENDPOINT_DESC:
 		{
 			int desc_idx;
-			struct usb_endpoint_descriptor desc1, *desc;
+			struct usb_endpoint_descriptor *desc;
 
 			switch (epfile->ffs->gadget->speed) {
 			case USB_SPEED_SUPER:
@@ -1329,12 +1325,10 @@ static long ffs_epfile_ioctl(struct file *file, unsigned code,
 			default:
 				desc_idx = 0;
 			}
-
 			desc = epfile->ep->descs[desc_idx];
-			memcpy(&desc1, desc, desc->bLength);
 
 			spin_unlock_irq(&epfile->ffs->eps_lock);
-			ret = copy_to_user((void *)value, &desc1, desc1.bLength);
+			ret = copy_to_user((void *)value, desc, sizeof(*desc));
 			if (ret)
 				ret = -EFAULT;
 			return ret;
@@ -1895,14 +1889,12 @@ static void ffs_data_reset(struct ffs_data *ffs)
 	ffs->setup_state = FFS_NO_SETUP;
 	ffs->flags = 0;
 
-<<<<<<< HEAD
 	ffs->ms_os_descs_ext_prop_count = 0;
 	ffs->ms_os_descs_ext_prop_name_len = 0;
 	ffs->ms_os_descs_ext_prop_data_len = 0;
-=======
+	
 	ffs_log("exit: state %d setup_state %d flag %lu", ffs->state,
 		ffs->setup_state, ffs->flags);
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc
 }
 
 
@@ -2106,12 +2098,6 @@ static int ffs_func_eps_enable(struct ffs_function *func)
 			break;
 		}
 
-		/*
-		 * userspace setting maxburst > 1 results more fifo
-		 * allocation than without maxburst. Change maxburst to 1
-		 * only to allocate fifo size of max packet size.
-		 */
-		ep->ep->maxburst = 1;
 		ret = usb_ep_enable(ep->ep);
 		if (likely(!ret)) {
 			epfile->ep = ep;
@@ -4236,6 +4222,7 @@ static void ffs_closed(struct ffs_data *ffs)
 {
 	struct ffs_dev *ffs_obj;
 	struct f_fs_opts *opts;
+	struct config_item *ci;
 
 	ENTER();
 
@@ -4269,13 +4256,14 @@ static void ffs_closed(struct ffs_data *ffs)
 		goto done;
 	}
 
+	ci = opts->func_inst.group.cg_item.ci_parent->ci_parent;
 	ffs_dev_unlock();
 
 	if (test_bit(FFS_FL_BOUND, &ffs->flags)) {
-		unregister_gadget_item(opts->
-			       func_inst.group.cg_item.ci_parent->ci_parent);
+		unregister_gadget_item(ci);
 		ffs_log("unreg gadget done");
 	}
+	return;
 done:
 	ffs_log("exit");
 }

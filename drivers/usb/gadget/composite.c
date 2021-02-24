@@ -311,11 +311,8 @@ int usb_function_deactivate(struct usb_function *function)
 
 	spin_lock_irqsave(&cdev->lock, flags);
 
-	if (cdev->deactivations == 0) {
-		spin_unlock_irqrestore(&cdev->lock, flags);
+	if (cdev->deactivations == 0)
 		status = usb_gadget_deactivate(cdev->gadget);
-		spin_lock_irqsave(&cdev->lock, flags);
-	}
 	if (status == 0)
 		cdev->deactivations++;
 
@@ -346,11 +343,8 @@ int usb_function_activate(struct usb_function *function)
 		status = -EINVAL;
 	else {
 		cdev->deactivations--;
-		if (cdev->deactivations == 0) {
-			spin_unlock_irqrestore(&cdev->lock, flags);
+		if (cdev->deactivations == 0)
 			status = usb_gadget_activate(cdev->gadget);
-			spin_lock_irqsave(&cdev->lock, flags);
-		}
 	}
 
 	spin_unlock_irqrestore(&cdev->lock, flags);
@@ -896,16 +890,7 @@ static int set_config(struct usb_composite_dev *cdev,
 	}
 
 done:
-<<<<<<< HEAD
-	if (power <= USB_SELF_POWER_VBUS_MAX_DRAW)
-		usb_gadget_set_selfpowered(gadget);
-	else
-		usb_gadget_clear_selfpowered(gadget);
-
-	usb_gadget_vbus_draw(gadget, power);
-=======
 	usb_gadget_vbus_draw(gadget, USB_VBUS_DRAW(gadget->speed));
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc
 	if (result >= 0 && cdev->delayed_status)
 		result = USB_GADGET_DELAYED_STATUS;
 	return result;
@@ -2411,17 +2396,7 @@ void composite_resume(struct usb_gadget *gadget)
 				f->resume(f);
 		}
 
-<<<<<<< HEAD
-		maxpower = cdev->config->MaxPower;
-
-		if (maxpower > USB_SELF_POWER_VBUS_MAX_DRAW)
-			usb_gadget_clear_selfpowered(gadget);
-
-		usb_gadget_vbus_draw(gadget, maxpower ?
-			maxpower : CONFIG_USB_GADGET_VBUS_DRAW);
-=======
 		usb_gadget_vbus_draw(gadget, USB_VBUS_DRAW(gadget->speed));
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc
 	}
 
 	spin_unlock_irqrestore(&cdev->lock, flags);

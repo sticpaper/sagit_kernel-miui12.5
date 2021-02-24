@@ -394,16 +394,16 @@ unsigned long vmalloc_to_pfn(const void *addr);
  * On nommu, vmalloc/vfree wrap through kmalloc/kfree directly, so there
  * is no special casing required.
  */
-
-#ifdef CONFIG_MMU
-extern int is_vmalloc_addr(const void *x);
-#else
-static inline int is_vmalloc_addr(const void *x)
+static inline bool is_vmalloc_addr(const void *x)
 {
-	return 0;
-}
-#endif
+#ifdef CONFIG_MMU
+	unsigned long addr = (unsigned long)x;
 
+	return addr >= VMALLOC_START && addr < VMALLOC_END;
+#else
+	return false;
+#endif
+}
 #ifdef CONFIG_MMU
 extern int is_vmalloc_or_module_addr(const void *x);
 #else
@@ -2033,7 +2033,7 @@ int write_one_page(struct page *page, int wait);
 void task_dirty_inc(struct task_struct *tsk);
 
 /* readahead.c */
-#define VM_MAX_READAHEAD	512	/* kbytes */
+#define VM_MAX_READAHEAD	CONFIG_VM_MAX_READAHEAD	/* kbytes */
 #define VM_MIN_READAHEAD	16	/* kbytes (includes current page) */
 
 int force_page_cache_readahead(struct address_space *mapping, struct file *filp,

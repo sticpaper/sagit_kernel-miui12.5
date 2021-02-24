@@ -3,7 +3,7 @@
  *
  * This code is based on drivers/scsi/ufs/ufshcd.c
  * Copyright (C) 2011-2013 Samsung India Software Operations
- * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
  *
  * Authors:
  *	Santosh Yaraganavi <santosh.sy@samsung.com>
@@ -558,6 +558,7 @@ static void ufshcd_cmd_log_init(struct ufs_hba *hba)
 	}
 }
 
+#ifdef CONFIG_TRACEPOINTS
 static void __ufshcd_cmd_log(struct ufs_hba *hba, char *str, char *cmd_type,
 			     unsigned int tag, u8 cmd_id, u8 idn, u8 lun,
 			     sector_t lba, int transfer_len, u8 opcode)
@@ -586,6 +587,7 @@ static void __ufshcd_cmd_log(struct ufs_hba *hba, char *str, char *cmd_type,
 
 	ufshcd_add_command_trace(hba, entry, opcode);
 }
+#endif
 
 static void ufshcd_cmd_log(struct ufs_hba *hba, char *str, char *cmd_type,
 	unsigned int tag, u8 cmd_id, u8 idn)
@@ -629,6 +631,7 @@ static void ufshcd_cmd_log_init(struct ufs_hba *hba)
 {
 }
 
+#ifdef CONFIG_TRACEPOINTS
 static void __ufshcd_cmd_log(struct ufs_hba *hba, char *str, char *cmd_type,
 			     unsigned int tag, u8 cmd_id, u8 idn, u8 lun,
 			     sector_t lba, int transfer_len, u8 opcode)
@@ -644,6 +647,7 @@ static void __ufshcd_cmd_log(struct ufs_hba *hba, char *str, char *cmd_type,
 
 	ufshcd_add_command_trace(hba, &entry, opcode);
 }
+#endif
 
 static void ufshcd_dme_cmd_log(struct ufs_hba *hba, char *str, u8 cmd_id)
 {
@@ -1823,8 +1827,13 @@ static void ufshcd_init_clk_gating(struct ufs_hba *hba)
 	gating->delay_ms_pwr_save = UFSHCD_CLK_GATING_DELAY_MS_PWR_SAVE;
 	gating->delay_ms_perf = UFSHCD_CLK_GATING_DELAY_MS_PERF;
 
+#ifdef CONFIG_UFS_HOST_PM_QOS_KERNEL
 	/* start with performance mode */
 	gating->delay_ms = gating->delay_ms_perf;
+#else
+	/* start with power-save mode */
+	gating->delay_ms = gating->delay_ms_pwr_save;
+#endif /* CONFIG_UFS_HOST_PM_QOS_KERNEL */
 
 	if (!ufshcd_is_clkscaling_supported(hba))
 		goto scaling_not_supported;
@@ -1921,35 +1930,8 @@ static int ufshcd_hibern8_hold(struct ufs_hba *hba, bool async)
 	}
 
 start:
-<<<<<<< HEAD
-	switch (hba->clk_gating.state) {
-	case CLKS_ON:
-		/*
-		 * Wait for the ungate work to complete if in progress.
-		 * Though the clocks may be in ON state, the link could
-		 * still be in hibner8 state if hibern8 is allowed
-		 * during clock gating.
-		 * Make sure we exit hibern8 state also in addition to
-		 * clocks being ON.
-		 */
-		if (ufshcd_can_hibern8_during_gating(hba) &&
-		    ufshcd_is_link_hibern8(hba)) {
-			if (async) {
-				rc = -EAGAIN;
-				hba->clk_gating.active_reqs--;
-				break;
-			}
-			spin_unlock_irqrestore(hba->host->host_lock, flags);
-			flush_result = flush_work(&hba->clk_gating.ungate_work);
-			if (hba->clk_gating.is_suspended && !flush_result)
-				goto out;
-			spin_lock_irqsave(hba->host->host_lock, flags);
-			goto start;
-		}
-=======
 	switch (hba->hibern8_on_idle.state) {
 	case HIBERN8_EXITED:
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc
 		break;
 	case REQ_HIBERN8_ENTER:
 		if (cancel_delayed_work(&hba->hibern8_on_idle.enter_work)) {
@@ -5434,15 +5416,8 @@ ufshcd_transfer_rsp_status(struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
 			 * UFS device needs urgent BKOPs.
 			 */
 			if (!hba->pm_op_in_progress &&
-			    ufshcd_is_exception_event(lrbp->ucd_rsp_ptr)) {
-				/*
-				 * Prevent suspend once eeh_work is scheduled
-				 * to avoid deadlock between ufshcd_suspend
-				 * and exception event handler.
-				 */
-				if (schedule_work(&hba->eeh_work))
-					pm_runtime_get_noresume(hba->dev);
-			}
+			    ufshcd_is_exception_event(lrbp->ucd_rsp_ptr))
+				schedule_work(&hba->eeh_work);
 			break;
 		case UPIU_TRANSACTION_REJECT_UPIU:
 			/* TODO: handle Reject UPIU Response */
@@ -6019,13 +5994,6 @@ static void ufshcd_exception_event_handler(struct work_struct *work)
 
 out:
 	ufshcd_scsi_unblock_requests(hba);
-	/*
-	 * pm_runtime_get_noresume is called while scheduling
-	 * eeh_work to avoid suspend racing with exception work.
-	 * Hence decrement usage counter using pm_runtime_put_noidle
-	 * to allow suspend on completion of exception event handler.
-	 */
-	pm_runtime_put_noidle(hba->dev);
 	pm_runtime_put(hba->dev);
 	return;
 }
@@ -8821,7 +8789,6 @@ static int ufshcd_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 			goto enable_gating;
 	}
 
-	flush_work(&hba->eeh_work);
 	ret = ufshcd_link_state_transition(hba, req_link_state, 1);
 	if (ret)
 		goto set_dev_active;
@@ -9424,9 +9391,6 @@ int ufshcd_shutdown(struct ufs_hba *hba)
 		goto out;
 
 	pm_runtime_get_sync(hba->dev);
-<<<<<<< HEAD
-
-=======
 	ufshcd_hold_all(hba);
 	ufshcd_mark_shutdown_ongoing(hba);
 	ufshcd_shutdown_clkscaling(hba);
@@ -9445,7 +9409,6 @@ int ufshcd_shutdown(struct ufs_hba *hba)
 	/* reqs issued from contexts other than shutdown will fail from now */
 	ufshcd_scsi_unblock_requests(hba);
 	ufshcd_release_all(hba);
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc
 	ret = ufshcd_suspend(hba, UFS_SHUTDOWN_PM);
 out:
 	if (ret)

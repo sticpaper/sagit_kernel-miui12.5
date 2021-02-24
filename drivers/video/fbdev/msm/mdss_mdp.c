@@ -1,7 +1,7 @@
 /*
  * MDSS MDP Interface (used by framebuffer core)
  *
- * Copyright (c) 2007-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2007-2018, The Linux Foundation. All rights reserved.
  * Copyright (C) 2007 Google Incorporated
  *
  * This software is licensed under the terms of the GNU General Public
@@ -61,7 +61,11 @@
 #include "mdss_mdp_trace.h"
 
 #define AXI_HALT_TIMEOUT_US	0x4000
+#ifdef CONFIG_PAPER_LCD_AUTOSLEEP
+#define AUTOSUSPEND_TIMEOUT_MS	180
+#else
 #define AUTOSUSPEND_TIMEOUT_MS	200
+#endif
 #define DEFAULT_MDP_PIPE_WIDTH	2048
 #define RES_1080p		(1088*1920)
 #define RES_UHD			(3840*2160)
@@ -1169,6 +1173,12 @@ irqreturn_t mdss_mdp_isr(int irq, void *ptr)
 	}
 
 	mdss_mdp_video_isr(mdata->video_intf, mdata->nintf);
+
+#ifdef CONFIG_MACH_SAGIT
+	if (cmpxchg(&mdata->pm_irq_set, true, false))
+		schedule_work(&mdata->pm_unset_work);
+#endif
+
 	return IRQ_HANDLED;
 }
 
@@ -1840,6 +1850,16 @@ static int mdss_mdp_gdsc_notifier_call(struct notifier_block *self,
 	return NOTIFY_OK;
 }
 
+#ifdef CONFIG_MACH_SAGIT
+static void mdss_pm_unset(struct work_struct *work)
+{
+	struct mdss_data_type *mdata = container_of(work, typeof(*mdata),
+						    pm_unset_work);
+
+	pm_qos_update_request(&mdata->pm_irq_req, PM_QOS_DEFAULT_VALUE);
+}
+#endif
+
 static int mdss_mdp_irq_clk_setup(struct mdss_data_type *mdata)
 {
 	int ret;
@@ -1854,12 +1874,21 @@ static int mdss_mdp_irq_clk_setup(struct mdss_data_type *mdata)
 	pr_debug("max mdp clk rate=%d\n", mdata->max_mdp_clk_rate);
 
 	ret = devm_request_irq(&mdata->pdev->dev, mdss_mdp_hw.irq_info->irq,
-				mdss_irq_handler, 0x0, "MDSS", mdata);
+				mdss_irq_handler,
+				IRQF_PERF_CRITICAL, "MDSS", mdata);
 	if (ret) {
 		pr_err("mdp request_irq() failed!\n");
 		return ret;
 	}
 	disable_irq(mdss_mdp_hw.irq_info->irq);
+
+#ifdef CONFIG_MACH_SAGIT
+	INIT_WORK(&mdata->pm_unset_work, mdss_pm_unset);
+	mdata->pm_irq_req.type = PM_QOS_REQ_AFFINE_IRQ;
+	mdata->pm_irq_req.irq = mdss_mdp_hw.irq_info->irq;
+	pm_qos_add_request(&mdata->pm_irq_req, PM_QOS_CPU_DMA_LATENCY,
+			   PM_QOS_DEFAULT_VALUE);
+#endif
 
 	mdata->fs = devm_regulator_get(&mdata->pdev->dev, "vdd");
 	if (IS_ERR_OR_NULL(mdata->fs)) {
@@ -3117,8 +3146,7 @@ static int mdss_mdp_probe(struct platform_device *pdev)
 		MDSS_MDP_REG_SPLIT_DISPLAY_EN);
 	if (intf_sel != 0) {
 		for (i = 0; i < 4; i++)
-			num_of_display_on +=
-				(((intf_sel >> i*8) & 0x000000FF) ? 1 : 0);
+			num_of_display_on += ((intf_sel >> i*8) & 0x000000FF);
 
 		/*
 		 * For split display enabled - DSI0, DSI1 interfaces are

@@ -48,9 +48,6 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	for (lru = LRU_BASE; lru < NR_LRU_LISTS; lru++)
 		pages[lru] = global_page_state(NR_LRU_BASE + lru);
 
-<<<<<<< HEAD
-	available = si_mem_available();
-=======
 	for_each_zone(zone)
 		wmark_low += zone->watermark[WMARK_LOW];
 
@@ -85,7 +82,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 
 	if (available < 0)
 		available = 0;
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc
+	available = si_mem_available();
 
 	/*
 	 * Tagged format, for easy grepping and expansion.
@@ -193,7 +190,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		K(vm_commit_limit()),
 		K(committed),
 		(unsigned long)VMALLOC_TOTAL >> 10,
-		0ul, // used to be vmalloc 'used'
+		K(vmalloc_nr_pages()), // used to be vmalloc 'used'
 		0ul  // used to be vmalloc 'largest_chunk'
 #ifdef CONFIG_MEMORY_FAILURE
 		, atomic_long_read(&num_poisoned_pages) << (PAGE_SHIFT - 10)

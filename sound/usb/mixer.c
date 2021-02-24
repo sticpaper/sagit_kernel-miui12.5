@@ -1051,16 +1051,6 @@ static void volume_control_quirks(struct usb_mixer_elem_info *cval,
 			cval->res = 384;
 		}
 		break;
-<<<<<<< HEAD
-	case USB_ID(0x0495, 0x3042): /* ESS Technology Asus USB DAC */
-		if ((strstr(kctl->id.name, "Playback Volume") != NULL) ||
-			strstr(kctl->id.name, "Capture Volume") != NULL) {
-			cval->min >>= 8;
-			cval->max = 0;
-			cval->res = 1;
-		}
-		break;
-=======
 
 	case USB_ID(0x1130, 0x1620): /* Logitech Speakers S150 */
 	/* This audio device has 2 channels and it explicitly requires the
@@ -1072,7 +1062,14 @@ static void volume_control_quirks(struct usb_mixer_elem_info *cval,
 						(cval->control << 8) | 2, 7936);
 		break;
 
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc
+	case USB_ID(0x0495, 0x3042): /* ESS Technology Asus USB DAC */
+		if ((strstr(kctl->id.name, "Playback Volume") != NULL) ||
+			strstr(kctl->id.name, "Capture Volume") != NULL) {
+			cval->min >>= 8;
+			cval->max = 0;
+			cval->res = 1;
+		}
+		break;
 	}
 }
 
@@ -1584,12 +1581,12 @@ static int find_num_channels(struct mixer_build *state, int dir)
 static int parse_audio_feature_unit(struct mixer_build *state, int unitid,
 				    void *_ftr)
 {
-	int channels, i, j;
+	int channels = 0, i, j;
 	struct usb_audio_term iterm;
 	unsigned int master_bits, first_ch_bits;
 	int err, csize;
 	struct uac_feature_unit_descriptor *hdr = _ftr;
-	__u8 *bmaControls;
+	__u8 *bmaControls = NULL;
 
 	if (state->mixer->protocol == UAC_VERSION_1) {
 		if (hdr->bLength < 7) {

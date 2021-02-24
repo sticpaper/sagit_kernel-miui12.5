@@ -2141,21 +2141,12 @@ static int ath10k_core_probe_fw(struct ath10k *ar)
 		goto err_power_down;
 	}
 
-<<<<<<< HEAD
-	ret = ath10k_core_get_board_id_from_otp(ar);
-	if (ret && ret != -EOPNOTSUPP) {
-		ath10k_err(ar, "failed to get board id from otp for qca99x0: %d\n",
-			   ret);
-		goto err_free_firmware_files;
-	}
-=======
 	BUILD_BUG_ON(sizeof(ar->hw->wiphy->fw_version) !=
 			sizeof(ar->normal_mode_fw.fw_file.fw_version));
 	memcpy(ar->hw->wiphy->fw_version,
 	       ar->normal_mode_fw.fw_file.fw_version,
 	       sizeof(ar->hw->wiphy->fw_version));
 	ath10k_debug_print_hwfw_info(ar);
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc
 
 	if (ar->is_bmi) {
 		ret = ath10k_core_pre_cal_download(ar);
@@ -2167,12 +2158,12 @@ static int ath10k_core_probe_fw(struct ath10k *ar)
 				   "could not load pre cal data: %d\n", ret);
 		}
 
-		ret = ath10k_core_get_board_id_from_otp(ar);
-		if (ret && ret != -EOPNOTSUPP) {
-			ath10k_err(ar, "failed to get board id from otp: %d\n",
-				   ret);
-			goto err_free_firmware_files;
-		}
+	ret = ath10k_core_get_board_id_from_otp(ar);
+	if (ret && ret != -EOPNOTSUPP) {
+		ath10k_err(ar, "failed to get board id from otp for qca99x0: %d\n",
+			   ret);
+		goto err_free_firmware_files;
+	}
 
 		ret = ath10k_core_fetch_board_file(ar);
 		if (ret) {

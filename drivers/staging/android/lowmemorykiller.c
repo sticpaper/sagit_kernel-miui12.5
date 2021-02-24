@@ -18,6 +18,7 @@
  * and processes may not get killed until the normal oom killer is triggered.
  *
  * Copyright (C) 2007-2008 Google, Inc.
+ * Copyright (C) 2020 XiaoMi, Inc.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -66,7 +67,7 @@
 #define CREATE_TRACE_POINTS
 #include "trace/lowmemorykiller.h"
 
-static uint32_t lowmem_debug_level = 1;
+static uint32_t lowmem_debug_level = 0;
 static short lowmem_adj[6] = {
 	0,
 	1,
@@ -82,6 +83,9 @@ static int lowmem_minfree[6] = {
 };
 static int lowmem_minfree_size = 4;
 static int lmk_fast_run = 1;
+
+static int enable_lmk = 1;
+module_param_named(enable_lmk, enable_lmk, int, 0644);
 
 static unsigned long lowmem_deathpending_timeout;
 
@@ -228,6 +232,9 @@ static void lmk_event_init(void)
 static unsigned long lowmem_count(struct shrinker *s,
 				  struct shrink_control *sc)
 {
+	if (!enable_lmk)
+		return 0;
+
 	return global_page_state(NR_ACTIVE_ANON) +
 		global_page_state(NR_ACTIVE_FILE) +
 		global_page_state(NR_INACTIVE_ANON) +
@@ -240,9 +247,8 @@ module_param_named(adj_max_shift, adj_max_shift, short,
                    S_IRUGO | S_IWUSR);
 
 /* User knob to enable/disable adaptive lmk feature */
-static int enable_adaptive_lmk;
-module_param_named(enable_adaptive_lmk, enable_adaptive_lmk, int,
-		   S_IRUGO | S_IWUSR);
+static int enable_adaptive_lmk = 0;
+module_param_named(enable_adaptive_lmk, enable_adaptive_lmk, int, 0444);
 
 /*
  * This parameter controls the behaviour of LMK when vmpressure is in

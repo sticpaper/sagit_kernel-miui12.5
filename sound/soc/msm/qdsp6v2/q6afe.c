@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -29,6 +29,10 @@
 #include <sound/adsp_err.h>
 #include <linux/qdsp6v2/apr_tal.h>
 #include <sound/q6core.h>
+
+#ifdef CONFIG_MACH_CHIRON
+#include <sound/apr_elliptic.h>
+#endif
 
 #define WAKELOCK_TIMEOUT	5000
 enum {
@@ -111,6 +115,11 @@ struct afe_ctl {
 	u16 dtmf_gen_rx_portid;
 	struct audio_cal_info_spk_prot_cfg	prot_cfg;
 	struct afe_spkr_prot_calib_get_resp	calib_data;
+
+#ifdef CONFIG_MACH_CHIRON
+	struct afe_ultrasound_calib_get_resp	ultrasound_calib_data;
+#endif
+
 	struct audio_cal_info_sp_th_vi_ftm_cfg	th_ftm_cfg;
 	struct audio_cal_info_sp_ex_vi_ftm_cfg	ex_ftm_cfg;
 	struct afe_sp_th_vi_get_param_resp	th_vi_resp;
@@ -615,6 +624,11 @@ static int32_t afe_callback(struct apr_client_data *data, void *priv)
 		if (!ret) {
 			return ret;
 		}
+#ifdef CONFIG_MACH_CHIRON
+	} else if (data->opcode == ULTRASOUND_OPCODE) {
+		if (data->payload != NULL)
+			elliptic_process_apr_payload(data->payload);
+#endif
 	} else if (data->payload_size) {
 		uint32_t *payload;
 		uint16_t port_id = 0;
@@ -785,8 +799,6 @@ int afe_get_port_type(u16 port_id)
 	case VOICE_PLAYBACK_TX:
 	case VOICE2_PLAYBACK_TX:
 	case RT_PROXY_PORT_001_RX:
-	case RT_PROXY_PORT_002_RX:
-	case RT_PROXY_PORT_002_TX:
 	case AUDIO_PORT_ID_I2S_RX:
 	case AFE_PORT_ID_PRIMARY_MI2S_RX:
 	case AFE_PORT_ID_SECONDARY_MI2S_RX:
@@ -1693,6 +1705,19 @@ fail_cmd:
 		 param_info.param_id, ret, src_port);
 	return ret;
 }
+
+#ifdef CONFIG_MACH_CHIRON
+/* ELUS Begin */
+afe_ultrasound_state_t elus_afe = {
+	.ptr_apr = &this_afe.apr,
+	.ptr_status = &this_afe.status,
+	.ptr_state = &this_afe.state,
+	.ptr_wait = this_afe.wait,
+	.timeout_ms = TIMEOUT_MS,
+	.ptr_ultrasound_calib_data = &this_afe.ultrasound_calib_data
+};
+/* ELUS End */
+#endif
 
 static void afe_send_cal_spkr_prot_tx(int port_id)
 {
@@ -3424,8 +3449,6 @@ static int __afe_port_start(u16 port_id, union afe_port_config *afe_config,
 		break;
 	case RT_PROXY_PORT_001_RX:
 	case RT_PROXY_PORT_001_TX:
-	case RT_PROXY_PORT_002_RX:
-	case RT_PROXY_PORT_002_TX:
 		cfg_type = AFE_PARAM_ID_RT_PROXY_CONFIG;
 		break;
 	case INT_BT_SCO_RX:
@@ -3837,10 +3860,6 @@ int afe_get_port_index(u16 port_id)
 		return IDX_AFE_PORT_ID_QUATERNARY_MI2S_RX_3;
 	case AFE_PORT_ID_QUATERNARY_MI2S_RX_4:
 		return IDX_AFE_PORT_ID_QUATERNARY_MI2S_RX_4;
-	case RT_PROXY_PORT_002_RX:
-		return IDX_RT_PROXY_PORT_002_RX;
-	case RT_PROXY_PORT_002_TX:
-		return IDX_RT_PROXY_PORT_002_TX;
 	default:
 		pr_err("%s: port 0x%x\n", __func__, port_id);
 		return -EINVAL;
@@ -5818,8 +5837,6 @@ int afe_validate_port(u16 port_id)
 	case AFE_PORT_ID_INT4_MI2S_TX:
 	case AFE_PORT_ID_INT5_MI2S_TX:
 	case AFE_PORT_ID_INT6_MI2S_TX:
-	case RT_PROXY_PORT_002_RX:
-	case RT_PROXY_PORT_002_TX:
 	{
 		ret = 0;
 		break;

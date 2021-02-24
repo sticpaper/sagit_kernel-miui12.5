@@ -31,7 +31,6 @@
 *.xz
 *.lz4
 *.lzo
-*.patch
 *.gcno
 *.ll
 modules.builtin
@@ -114,10 +113,11 @@ all.config
 # Kdevelop4
 *.kdev4
 
+# out-kernel
+out
+phone_build.sh
+server_build.sh
+toolchain
+
 # fetched Android config fragments
 android/configs/android-*.cfg
-
-#
-#Ignoring Android.bp link file
-#
-Android.bp

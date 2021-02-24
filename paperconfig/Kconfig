@@ -1,0 +1,23 @@
+config UFS_HOST_PM_QOS_KERNEL
+	tristate "Control UFS sleep strategy"
+	select SCSI_UFS_QCOM
+	help
+	  Reduce performance fluctuations.
+
+config PROC_CPUMAXFREQ
+	tristate "Export cpumaxfreq"
+	help
+	  File: /proc/cpumaxfreq.
+
+config SERIAL_NUM
+	bool "Enable Serial Number Proc Interface"
+	default n
+	help
+	  Provide a interface for reading CPU serial number
+
+config PAPER_LCD_AUTOSLEEP
+	bool "Adjust sleep time"
+	default n
+	help
+	  Enter automatic sleep faster
+

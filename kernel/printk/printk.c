@@ -619,6 +619,7 @@ struct devkmsg_user {
 
 static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 {
+#if 0
 	char *buf, *line;
 	int level = default_message_loglevel;
 	int facility = 1;	/* LOG_USER */
@@ -648,6 +649,10 @@ static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 	 */
 	line = buf;
 	if (line[0] == '<') {
+		if (memcmp(line+3, "batteryd", sizeof("batteryd")-1) == 0 ||
+			   memcmp(line+3, "healthd", sizeof("healthd")-1) == 0)
+			goto ignore;
+		{
 		char *endp = NULL;
 		unsigned int u;
 
@@ -660,11 +665,16 @@ static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 			len -= endp - line;
 			line = endp;
 		}
+		}
 	}
 
 	printk_emit(facility, level, NULL, 0, "%s", line);
+ignore:
 	kfree(buf);
 	return ret;
+#else
+	return iov_iter_count(from);
+#endif
 }
 
 static ssize_t devkmsg_read(struct file *file, char __user *buf,

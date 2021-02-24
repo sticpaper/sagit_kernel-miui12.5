@@ -76,7 +76,7 @@
 #include "binder_trace.h"
 
 static HLIST_HEAD(binder_deferred_list);
-static DEFINE_MUTEX(binder_deferred_lock);
+static DEFINE_SPINLOCK(binder_deferred_lock);
 
 static HLIST_HEAD(binder_devices);
 static HLIST_HEAD(binder_procs);
@@ -137,8 +137,7 @@ enum {
 	BINDER_DEBUG_PRIORITY_CAP           = 1U << 13,
 	BINDER_DEBUG_SPINLOCKS              = 1U << 14,
 };
-static uint32_t binder_debug_mask = BINDER_DEBUG_USER_ERROR |
-	BINDER_DEBUG_FAILED_TRANSACTION | BINDER_DEBUG_DEAD_TRANSACTION;
+static uint32_t binder_debug_mask = 0;
 module_param_named(debug_mask, binder_debug_mask, uint, 0644);
 
 static char *binder_devices_param = CONFIG_ANDROID_BINDER_DEVICES;
@@ -284,7 +283,7 @@ struct binder_device {
 struct binder_work {
 	struct list_head entry;
 
-	enum binder_work_type {
+	enum {
 		BINDER_WORK_TRANSACTION = 1,
 		BINDER_WORK_TRANSACTION_COMPLETE,
 		BINDER_WORK_RETURN_ERROR,
@@ -489,7 +488,8 @@ struct binder_priority {
  * struct binder_proc - binder process bookkeeping
  * @proc_node:            element for binder_procs list
  * @threads:              rbtree of binder_threads in this proc
- *                        (protected by @inner_lock)
+ *                        (atomic since @proc->inner_lock cannot
+ *                        always be acquired)
  * @nodes:                rbtree of binder nodes associated with
  *                        this proc ordered by node->ptr
  *                        (protected by @inner_lock)
@@ -528,8 +528,7 @@ struct binder_priority {
  * @requested_threads_started: number binder threads started
  *                        (protected by @inner_lock)
  * @tmp_ref:              temporary reference to indicate proc is in use
- *                        (atomic since @proc->inner_lock cannot
- *                        always be acquired)
+ *                        (protected by @inner_lock)
  * @default_priority:     default scheduler priority
  *                        (invariant after initialized)
  * @debugfs_entry:        debugfs node
@@ -918,6 +917,27 @@ static struct binder_work *binder_dequeue_work_head_ilocked(
 	w = list_first_entry_or_null(list, struct binder_work, entry);
 	if (w)
 		list_del_init(&w->entry);
+	return w;
+}
+
+/**
+ * binder_dequeue_work_head() - Dequeues the item at head of list
+ * @proc:         binder_proc associated with list
+ * @list:         list to dequeue head
+ *
+ * Removes the head of the list if there are items on the list
+ *
+ * Return: pointer dequeued binder_work, NULL if list was empty
+ */
+static struct binder_work *binder_dequeue_work_head(
+					struct binder_proc *proc,
+					struct list_head *list)
+{
+	struct binder_work *w;
+
+	binder_inner_proc_lock(proc);
+	w = binder_dequeue_work_head_ilocked(list);
+	binder_inner_proc_unlock(proc);
 	return w;
 }
 
@@ -3021,8 +3041,6 @@ static void binder_transaction(struct binder_proc *proc,
 		e->to_node = target_node->debug_id;
 		if (WARN_ON(proc == target_proc)) {
 			return_error = BR_FAILED_REPLY;
-			return_error_param = -EINVAL;
-			return_error_line = __LINE__;
 			goto err_invalid_target_handle;
 		}
 		if (security_binder_transaction(proc->tsk,
@@ -3556,17 +3574,10 @@ static int binder_thread_write(struct binder_proc *proc,
 				struct binder_node *ctx_mgr_node;
 				mutex_lock(&context->context_mgr_node_lock);
 				ctx_mgr_node = context->binder_context_mgr_node;
-				if (ctx_mgr_node) {
-					if (ctx_mgr_node->proc == proc) {
-						binder_user_error("%d:%d context manager tried to acquire desc 0\n",
-								  proc->pid, thread->pid);
-						mutex_unlock(&context->context_mgr_node_lock);
-						return -EINVAL;
-					}
+				if (ctx_mgr_node)
 					ret = binder_inc_ref_for_node(
 							proc, ctx_mgr_node,
 							strong, NULL, &rdata);
-				}
 				mutex_unlock(&context->context_mgr_node_lock);
 			}
 			if (ret)
@@ -4162,7 +4173,7 @@ retry:
 			e->cmd = BR_OK;
 			ptr += sizeof(uint32_t);
 
-			binder_stat_br(proc, thread, e->cmd);
+			binder_stat_br(proc, thread, cmd);
 		} break;
 		case BINDER_WORK_TRANSACTION_COMPLETE: {
 			binder_inner_proc_unlock(proc);
@@ -4434,17 +4445,13 @@ static void binder_release_work(struct binder_proc *proc,
 				struct list_head *list)
 {
 	struct binder_work *w;
-	enum binder_work_type wtype;
 
 	while (1) {
-		binder_inner_proc_lock(proc);
-		w = binder_dequeue_work_head_ilocked(list);
-		wtype = w ? w->type : 0;
-		binder_inner_proc_unlock(proc);
+		w = binder_dequeue_work_head(proc, list);
 		if (!w)
 			return;
 
-		switch (wtype) {
+		switch (w->type) {
 		case BINDER_WORK_TRANSACTION: {
 			struct binder_transaction *t;
 
@@ -4478,11 +4485,9 @@ static void binder_release_work(struct binder_proc *proc,
 			kfree(death);
 			binder_stats_deleted(BINDER_STAT_DEATH);
 		} break;
-		case BINDER_WORK_NODE:
-			break;
 		default:
 			pr_err("unexpected work type, %d, not freed\n",
-			       wtype);
+			       w->type);
 			break;
 		}
 	}
@@ -5327,7 +5332,7 @@ static void binder_deferred_func(struct work_struct *work)
 	int defer;
 
 	do {
-		mutex_lock(&binder_deferred_lock);
+		spin_lock(&binder_deferred_lock);
 		if (!hlist_empty(&binder_deferred_list)) {
 			proc = hlist_entry(binder_deferred_list.first,
 					struct binder_proc, deferred_work_node);
@@ -5338,7 +5343,7 @@ static void binder_deferred_func(struct work_struct *work)
 			proc = NULL;
 			defer = 0;
 		}
-		mutex_unlock(&binder_deferred_lock);
+		spin_unlock(&binder_deferred_lock);
 
 		files = NULL;
 		if (defer & BINDER_DEFERRED_PUT_FILES) {
@@ -5364,14 +5369,14 @@ static DECLARE_WORK(binder_deferred_work, binder_deferred_func);
 static void
 binder_defer_work(struct binder_proc *proc, enum binder_deferred_state defer)
 {
-	mutex_lock(&binder_deferred_lock);
+	spin_lock(&binder_deferred_lock);
 	proc->deferred_work |= defer;
 	if (hlist_unhashed(&proc->deferred_work_node)) {
 		hlist_add_head(&proc->deferred_work_node,
 				&binder_deferred_list);
 		queue_work(binder_deferred_workqueue, &binder_deferred_work);
 	}
-	mutex_unlock(&binder_deferred_lock);
+	spin_unlock(&binder_deferred_lock);
 }
 
 static void print_binder_transaction_ilocked(struct seq_file *m,

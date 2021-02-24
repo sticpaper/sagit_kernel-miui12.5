@@ -1,0 +1,36 @@
+From 708abadfb30cee2ebbb09818f56885d874ee3e00 Mon Sep 17 00:00:00 2001
+From: dianlujitao <dianlujitao@lineageos.org>
+Date: Sat, 27 Jan 2018 17:37:34 +0800
+Subject: [PATCH] staging: qcacld-3.0: Add make entry
+
+Change-Id: Ie8061a37fb02ea582ac6bf98a53a8583cbaea9bf
+Signed-off-by: Dusan Uveric <dusan.uveric9@gmail.com>
+Signed-off-by: Jago Gardiner (nysadev) <jagogardiner@gmail.com>
+Signed-off-by: nysadev <jagogardiner@gmail.com>
+Signed-off-by: Jago Gardiner (nysadev) <jagogardiner@gmail.com>
+Signed-off-by: nysascape <nysadev@raphielgang.org>
+---
+ drivers/staging/Kconfig  | 2 ++
+ drivers/staging/Makefile | 1 +
+ 2 files changed, 3 insertions(+)
+
+diff --git a/drivers/staging/Kconfig b/drivers/staging/Kconfig
+index 5d3b86a33857..b179aaacb87c 100644
+--- a/drivers/staging/Kconfig
++++ b/drivers/staging/Kconfig
+@@ -110,4 +110,6 @@ source "drivers/staging/wilc1000/Kconfig"
+ 
+ source "drivers/staging/most/Kconfig"
+ 
++source "drivers/staging/qcacld-3.0/Kconfig"
++
+ endif # STAGING
+diff --git a/drivers/staging/Makefile b/drivers/staging/Makefile
+index 654ee8d54096..13f48c805645 100644
+--- a/drivers/staging/Makefile
++++ b/drivers/staging/Makefile
+@@ -46,3 +46,4 @@ obj-$(CONFIG_FB_TFT)		+= fbtft/
+ obj-$(CONFIG_FSL_MC_BUS)	+= fsl-mc/
+ obj-$(CONFIG_WILC1000)		+= wilc1000/
+ obj-$(CONFIG_MOST)		+= most/
++obj-$(CONFIG_QCA_CLD_WLAN)	+= qcacld-3.0/

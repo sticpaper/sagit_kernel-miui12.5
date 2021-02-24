@@ -303,7 +303,7 @@ void delete_from_page_cache(struct page *page)
 }
 EXPORT_SYMBOL(delete_from_page_cache);
 
-static int filemap_check_errors(struct address_space *mapping)
+int filemap_check_errors(struct address_space *mapping)
 {
 	int ret = 0;
 	/* Check for outstanding write errors */
@@ -315,6 +315,7 @@ static int filemap_check_errors(struct address_space *mapping)
 		ret = -EIO;
 	return ret;
 }
+EXPORT_SYMBOL(filemap_check_errors);
 
 /**
  * __filemap_fdatawrite_range - start writeback on mapping dirty pages in range
@@ -2401,6 +2402,9 @@ inline ssize_t generic_write_checks(struct kiocb *iocb, struct iov_iter *from)
 	struct inode *inode = file->f_mapping->host;
 	unsigned long limit = rlimit(RLIMIT_FSIZE);
 	loff_t pos;
+
+	if (IS_SWAPFILE(inode))
+		return -ETXTBSY;
 
 	if (!iov_iter_count(from))
 		return 0;

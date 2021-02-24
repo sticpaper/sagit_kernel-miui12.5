@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2019 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -63,6 +64,19 @@ static void scm_disable_sdi(void);
  * So the SDI cannot be re-enabled when it already by-passed.
 */
 
+static int in_panic;
+
+static int panic_prep_restart(struct notifier_block *this,
+			      unsigned long event, void *ptr)
+{
+	in_panic = 1;
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block panic_blk = {
+	.notifier_call	= panic_prep_restart,
+};
+
 #ifdef CONFIG_QCOM_DLOAD_MODE
 #define EDL_MODE_PROP "qcom,msm-imem-emergency_download_mode"
 #define DL_MODE_PROP "qcom,msm-imem-download_mode"
@@ -70,9 +84,8 @@ static void scm_disable_sdi(void);
 #define KASLR_OFFSET_PROP "qcom,msm-imem-kaslr_offset"
 #endif
 
-static int in_panic;
 static int dload_type = SCM_DLOAD_FULLDUMP;
-static int download_mode = 1;
+static int download_mode;
 static struct kobject dload_kobj;
 static void *dload_mode_addr, *dload_type_addr;
 static bool dload_mode_enabled;
@@ -99,17 +112,6 @@ struct reset_attribute {
 
 module_param_call(download_mode, dload_set, param_get_int,
 			&download_mode, 0644);
-
-static int panic_prep_restart(struct notifier_block *this,
-			      unsigned long event, void *ptr)
-{
-	in_panic = 1;
-	return NOTIFY_DONE;
-}
-
-static struct notifier_block panic_blk = {
-	.notifier_call	= panic_prep_restart,
-};
 
 int scm_set_dload_mode(int arg1, int arg2)
 {
@@ -152,7 +154,7 @@ static void set_dload_mode(int on)
 	dload_mode_enabled = on;
 }
 
-static bool get_dload_mode(void)
+int get_dload_mode(void)
 {
 	return dload_mode_enabled;
 }
@@ -294,6 +296,16 @@ static void msm_restart_prepare(const char *cmd)
 				(cmd != NULL && cmd[0] != '\0'));
 	}
 
+	/* To preserve console-ramoops */
+	need_warm_reset = true;
+
+	/* Perform a regular reboot upon panic or unspecified command */
+	if (in_panic || !cmd) {
+		__raw_writel(0x77665501, restart_reason);
+		cmd = NULL;
+		in_panic = false;
+	}
+
 	/* Hard reset the PMIC unless memory contents must be maintained. */
 	if (need_warm_reset) {
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
@@ -301,7 +313,10 @@ static void msm_restart_prepare(const char *cmd)
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_HARD_RESET);
 	}
 
-	if (cmd != NULL) {
+	if (in_panic) {
+		qpnp_pon_set_restart_reason(PON_RESTART_REASON_PANIC);
+		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
+	} else if (cmd != NULL) {
 		if (!strncmp(cmd, "bootloader", 10)) {
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_BOOTLOADER);
@@ -328,33 +343,22 @@ static void msm_restart_prepare(const char *cmd)
 			__raw_writel(0x7766550a, restart_reason);
 		} else if (!strncmp(cmd, "oem-", 4)) {
 			unsigned long code;
-			unsigned long reset_reason;
 			int ret;
 			ret = kstrtoul(cmd + 4, 16, &code);
-			if (!ret) {
-				/* Bit-2 to bit-7 of SOFT_RB_SPARE for hard
-				 * reset reason:
-				 * Value 0 to 31 for common defined features
-				 * Value 32 to 63 for oem specific features
-				 */
-				reset_reason = code +
-						PON_RESTART_REASON_OEM_MIN;
-				if (reset_reason > PON_RESTART_REASON_OEM_MAX ||
-				   reset_reason < PON_RESTART_REASON_OEM_MIN) {
-					pr_err("Invalid oem reset reason: %lx\n",
-						reset_reason);
-				} else {
-					qpnp_pon_set_restart_reason(
-						reset_reason);
-				}
+			if (!ret)
 				__raw_writel(0x6f656d00 | (code & 0xff),
 					     restart_reason);
-			}
 		} else if (!strncmp(cmd, "edl", 3)) {
+			if (0) {
 			enable_emergency_dload_mode();
+			}
 		} else {
+			qpnp_pon_set_restart_reason(PON_RESTART_REASON_NORMAL);
 			__raw_writel(0x77665501, restart_reason);
 		}
+	} else {
+		qpnp_pon_set_restart_reason(PON_RESTART_REASON_NORMAL);
+		__raw_writel(0x77665501, restart_reason);
 	}
 
 	flush_cache_all();
@@ -565,11 +569,12 @@ static int msm_restart_probe(struct platform_device *pdev)
 	struct device_node *np;
 	int ret = 0;
 
+	atomic_notifier_chain_register(&panic_notifier_list, &panic_blk);
+
 #ifdef CONFIG_QCOM_DLOAD_MODE
 	if (scm_is_call_available(SCM_SVC_BOOT, SCM_DLOAD_CMD) > 0)
 		scm_dload_supported = true;
 
-	atomic_notifier_chain_register(&panic_notifier_list, &panic_blk);
 	np = of_find_compatible_node(NULL, NULL, DL_MODE_PROP);
 	if (!np) {
 		pr_err("unable to find DT imem DLOAD mode node\n");

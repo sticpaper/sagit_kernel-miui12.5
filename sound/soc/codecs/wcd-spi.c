@@ -575,7 +575,13 @@ static int wcd_spi_clk_enable(struct spi_device *spi)
 			__func__, ret);
 		goto done;
 	}
-	wcd_spi_cmd_rdsr(spi, &rd_status);
+	ret = wcd_spi_cmd_rdsr(spi, &rd_status);
+
+	if (IS_ERR_VALUE(ret)) {
+		dev_err(&spi->dev, "%s: RDSR failed, err = %d\n",
+			__func__, ret);
+		goto done;
+	}
 	/*
 	 * Read status zero means reads are not
 	 * happenning on the bus, possibly because
@@ -602,8 +608,11 @@ static int wcd_spi_clk_disable(struct spi_device *spi)
 	if (IS_ERR_VALUE(ret))
 		dev_err(&spi->dev, "%s: Failed, err = %d\n",
 			__func__, ret);
-	else
-		clear_bit(WCD_SPI_CLK_STATE_ENABLED, &wcd_spi->status_mask);
+	/*
+	 * clear this bit even if clock disable failed
+	 * as the source clocks might get turned off.
+	 */
+	clear_bit(WCD_SPI_CLK_STATE_ENABLED, &wcd_spi->status_mask);
 
 	return ret;
 }

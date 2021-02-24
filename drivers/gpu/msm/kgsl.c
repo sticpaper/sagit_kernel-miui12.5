@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -2091,6 +2091,13 @@ long kgsl_ioctl_cmdstream_freememontimestamp_ctxtid(
 	return ret;
 }
 
+static inline int _check_region(unsigned long start, unsigned long size,
+				uint64_t len)
+{
+	uint64_t end = ((uint64_t) start) + size;
+	return (end > len);
+}
+
 static int check_vma_flags(struct vm_area_struct *vma,
 		unsigned int flags)
 {
@@ -2105,27 +2112,23 @@ static int check_vma_flags(struct vm_area_struct *vma,
 	return -EFAULT;
 }
 
-static int check_vma(unsigned long hostptr, u64 size)
+static int check_vma(struct vm_area_struct *vma, struct file *vmfile,
+		struct kgsl_memdesc *memdesc)
 {
-	struct vm_area_struct *vma;
-	unsigned long cur = hostptr;
+	if (vma == NULL || vma->vm_file != vmfile)
+		return -EINVAL;
 
-	while (cur < (hostptr + size)) {
-		vma = find_vma(current->mm, cur);
-		if (!vma)
-			return false;
-
-		/* Don't remap memory that we already own */
-		if (vma->vm_file && vma->vm_file->f_op == &kgsl_fops)
-			return false;
-
-		cur = vma->vm_end;
-	}
-
-	return true;
+	/* userspace may not know the size, in which case use the whole vma */
+	if (memdesc->size == 0)
+		memdesc->size = vma->vm_end - vma->vm_start;
+	/* range checking */
+	if (vma->vm_start != memdesc->useraddr ||
+		(memdesc->useraddr + memdesc->size) != vma->vm_end)
+		return -EINVAL;
+	return check_vma_flags(vma, memdesc->flags);
 }
 
-static int memdesc_sg_virt(struct kgsl_memdesc *memdesc)
+static int memdesc_sg_virt(struct kgsl_memdesc *memdesc, struct file *vmfile)
 {
 	int ret = 0;
 	long npages = 0, i;
@@ -2147,17 +2150,19 @@ static int memdesc_sg_virt(struct kgsl_memdesc *memdesc)
 	}
 
 	down_read(&current->mm->mmap_sem);
-	if (!check_vma(memdesc->useraddr, memdesc->size)) {
-		up_read(&current->mm->mmap_sem);
-		ret = ~EFAULT;
-		goto out;
-	}
+	/* If we have vmfile, make sure we map the correct vma and map it all */
+	if (vmfile != NULL)
+		ret = check_vma(find_vma(current->mm, memdesc->useraddr),
+				vmfile, memdesc);
 
-	npages = get_user_pages(current, current->mm, memdesc->useraddr,
-				sglen, write ? FOLL_WRITE : 0, pages, NULL);
+	if (ret == 0) {
+		npages = get_user_pages(current, current->mm, memdesc->useraddr,
+					sglen, write ? FOLL_WRITE : 0,
+					pages, NULL);
+		ret = (npages < 0) ? (int)npages : 0;
+	}
 	up_read(&current->mm->mmap_sem);
 
-	ret = (npages < 0) ? (int)npages : 0;
 	if (ret)
 		goto out;
 
@@ -2208,7 +2213,7 @@ static int kgsl_setup_anon_useraddr(struct kgsl_pagetable *pagetable,
 		entry->memdesc.gpuaddr = (uint64_t)  entry->memdesc.useraddr;
 	}
 
-	return memdesc_sg_virt(&entry->memdesc);
+	return memdesc_sg_virt(&entry->memdesc, NULL);
 }
 
 static int match_file(const void *p, struct file *file, unsigned int fd)
@@ -2481,7 +2486,7 @@ long kgsl_ioctl_gpuobj_import(struct kgsl_device_private *dev_priv,
 	return 0;
 
 unmap:
-	if (kgsl_memdesc_usermem_type(&entry->memdesc) == KGSL_MEM_ENTRY_ION) {
+	if (param->type == KGSL_USER_MEM_TYPE_DMABUF) {
 		kgsl_destroy_ion(entry->priv_data);
 		entry->memdesc.sgt = NULL;
 	}
@@ -2558,7 +2563,7 @@ static int kgsl_setup_dma_buf(struct kgsl_device *device,
 				struct kgsl_mem_entry *entry,
 				struct dma_buf *dmabuf)
 {
-	int ret = 0;
+	int i, ret = 0;
 	struct scatterlist *s;
 	struct sg_table *sg_table;
 	struct dma_buf_attachment *attach = NULL;
@@ -2598,7 +2603,7 @@ static int kgsl_setup_dma_buf(struct kgsl_device *device,
 	entry->memdesc.sgt = sg_table;
 
 	/* Calculate the size of the memdesc from the sglist */
-	for (s = entry->memdesc.sgt->sgl; s != NULL; s = sg_next(s)) {
+	for_each_sg(sg_table->sgl, s, sg_table->nents, i) {
 		int priv = (entry->memdesc.priv & KGSL_MEMDESC_SECURE) ? 1 : 0;
 
 		/*
@@ -2790,7 +2795,7 @@ long kgsl_ioctl_map_user_mem(struct kgsl_device_private *dev_priv,
 	return result;
 
 error_attach:
-	switch (kgsl_memdesc_usermem_type(&entry->memdesc)) {
+	switch (memtype) {
 	case KGSL_MEM_ENTRY_ION:
 		kgsl_destroy_ion(entry->priv_data);
 		entry->memdesc.sgt = NULL;
@@ -4197,8 +4202,6 @@ kgsl_mmap_memstore(struct kgsl_device *device, struct vm_area_struct *vma)
 	if (vma->vm_flags & VM_WRITE)
 		return -EPERM;
 
-	vma->vm_flags &= ~VM_MAYWRITE;
-
 	if (memdesc->size  !=  vma_size) {
 		KGSL_MEM_ERR(device, "memstore bad size: %d should be %llu\n",
 			     vma_size, memdesc->size);
@@ -4819,7 +4822,8 @@ int kgsl_device_platform_probe(struct kgsl_device *device)
 	}
 
 	status = devm_request_irq(device->dev, device->pwrctrl.interrupt_num,
-				  kgsl_irq_handler, IRQF_TRIGGER_HIGH,
+				  kgsl_irq_handler,
+				  IRQF_TRIGGER_HIGH | IRQF_PERF_CRITICAL,
 				  device->name, device);
 	if (status) {
 		KGSL_DRV_ERR(device, "request_irq(%d) failed: %d\n",
@@ -4833,7 +4837,6 @@ int kgsl_device_platform_probe(struct kgsl_device *device)
 		device->id, device->reg_phys, device->reg_len);
 
 	rwlock_init(&device->context_lock);
-	spin_lock_init(&device->submit_lock);
 
 	setup_timer(&device->idle_timer, kgsl_timer, (unsigned long) device);
 
@@ -4969,7 +4972,7 @@ static void kgsl_core_exit(void)
 static int __init kgsl_core_init(void)
 {
 	int result = 0;
-	struct sched_param param = { .sched_priority = 2 };
+	struct sched_param param = { .sched_priority = 8 };
 
 	/* alloc major and minor device numbers */
 	result = alloc_chrdev_region(&kgsl_driver.major, 0, KGSL_DEVICE_MAX,
@@ -5038,7 +5041,7 @@ static int __init kgsl_core_init(void)
 
 	init_kthread_worker(&kgsl_driver.worker);
 
-	kgsl_driver.worker_thread = kthread_run(kthread_worker_fn,
+	kgsl_driver.worker_thread = kthread_run_perf_critical(kthread_worker_fn,
 		&kgsl_driver.worker, "kgsl_worker_thread");
 
 	if (IS_ERR(kgsl_driver.worker_thread)) {

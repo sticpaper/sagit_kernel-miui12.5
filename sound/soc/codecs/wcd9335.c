@@ -2580,6 +2580,7 @@ static int slim_tx_mixer_put(struct snd_kcontrol *kcontrol,
 		if (dai_id >= ARRAY_SIZE(vport_i2s_check_table)) {
 			dev_err(codec->dev, "%s: dai_id: %d, out of bounds\n",
 				__func__, dai_id);
+			mutex_unlock(&tasha_p->codec_mutex);
 			return -EINVAL;
 		}
 		vtable = vport_i2s_check_table[dai_id];
@@ -4356,7 +4357,7 @@ static int tasha_codec_enable_spk_anc(struct snd_soc_dapm_widget *w,
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
 		ret = tasha_codec_enable_anc(w, kcontrol, event);
-		schedule_delayed_work(&tasha->spk_anc_dwork.dwork,
+		queue_delayed_work(system_power_efficient_wq, &tasha->spk_anc_dwork.dwork,
 				      msecs_to_jiffies(spk_anc_en_delay));
 		break;
 	case SND_SOC_DAPM_POST_PMD:
@@ -5052,6 +5053,8 @@ static int tasha_codec_enable_spline_src(struct snd_soc_codec *codec,
 		rx_path_ctl_reg = WCD9335_CDC_RX6_RX_PATH_CTL;
 		spl_src = SPLINE_SRC3;
 		break;
+	default:
+		return -EINVAL;
 	};
 
 	src_users = &tasha->spl_src_users[spl_src];
@@ -5944,6 +5947,10 @@ static int tasha_codec_enable_dec(struct snd_soc_dapm_widget *w,
 					    CF_MIN_3DB_150HZ << 5);
 		/* Enable TX PGA Mute */
 		snd_soc_update_bits(codec, tx_vol_ctl_reg, 0x10, 0x10);
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+		/* Disable APC */
+		snd_soc_update_bits(codec, dec_cfg_reg, 0x08, 0x00);
+#endif
 		break;
 	case SND_SOC_DAPM_POST_PMU:
 		snd_soc_update_bits(codec, hpf_gate_reg, 0x01, 0x00);
@@ -5955,11 +5962,11 @@ static int tasha_codec_enable_dec(struct snd_soc_dapm_widget *w,
 			snd_soc_write(codec, WCD9335_MBHC_ZDET_RAMP_CTL, 0x03);
 		}
 		/* schedule work queue to Remove Mute */
-		schedule_delayed_work(&tasha->tx_mute_dwork[decimator].dwork,
+		queue_delayed_work(system_power_efficient_wq, &tasha->tx_mute_dwork[decimator].dwork,
 				      msecs_to_jiffies(tx_unmute_delay));
 		if (tasha->tx_hpf_work[decimator].hpf_cut_off_freq !=
 							CF_MIN_3DB_150HZ)
-			schedule_delayed_work(
+			queue_delayed_work(system_power_efficient_wq, 
 					&tasha->tx_hpf_work[decimator].dwork,
 					msecs_to_jiffies(300));
 		/* apply gain after decimator is enabled */
@@ -12154,7 +12161,7 @@ static int tasha_dig_core_power_collapse(struct tasha_priv *tasha,
 
 	if (req_state == POWER_COLLAPSE) {
 		if (tasha->power_active_ref == 0) {
-			schedule_delayed_work(&tasha->power_gate_work,
+			queue_delayed_work(system_power_efficient_wq, &tasha->power_gate_work,
 			msecs_to_jiffies(dig_core_collapse_timer * 1000));
 		}
 	} else if (req_state == POWER_RESUME) {
@@ -13576,6 +13583,57 @@ static struct regulator *tasha_codec_find_ondemand_regulator(
 	return NULL;
 }
 
+#ifdef CONFIG_SOUND_CONTROL
+struct snd_soc_codec *sound_control_codec_ptr;
+
+static ssize_t headphone_gain_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d %d\n",
+		snd_soc_read(sound_control_codec_ptr, WCD9335_CDC_RX1_RX_VOL_CTL),
+		snd_soc_read(sound_control_codec_ptr, WCD9335_CDC_RX2_RX_VOL_CTL)
+	);
+}
+
+static ssize_t headphone_gain_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+
+	int input_l, input_r;
+
+	sscanf(buf, "%d %d", &input_l, &input_r);
+
+	if (input_l < -10 || input_l > 20)
+		input_l = 0;
+
+	if (input_r < -10 || input_r > 20)
+		input_r = 0;
+
+	snd_soc_write(sound_control_codec_ptr, WCD9335_CDC_RX1_RX_VOL_MIX_CTL, input_l);
+	snd_soc_write(sound_control_codec_ptr, WCD9335_CDC_RX2_RX_VOL_MIX_CTL, input_r);
+	snd_soc_write(sound_control_codec_ptr, WCD9335_CDC_RX1_RX_VOL_CTL, input_l);
+	snd_soc_write(sound_control_codec_ptr, WCD9335_CDC_RX2_RX_VOL_CTL, input_r);
+
+	return count;
+}
+
+static struct kobj_attribute headphone_gain_attribute =
+	__ATTR(headphone_gain, 0664,
+		headphone_gain_show,
+		headphone_gain_store);
+
+static struct attribute *sound_control_attrs[] = {
+		&headphone_gain_attribute.attr,
+		NULL,
+};
+
+static struct attribute_group sound_control_attr_group = {
+		.attrs = sound_control_attrs,
+};
+
+static struct kobject *sound_control_kobj;
+#endif
+
 static int tasha_codec_probe(struct snd_soc_codec *codec)
 {
 	struct wcd9xxx *control;
@@ -13585,6 +13643,10 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 	int i, ret;
 	void *ptr = NULL;
 	struct regulator *supply;
+
+#ifdef CONFIG_SOUND_CONTROL
+	sound_control_codec_ptr = codec;
+#endif
 
 	control = dev_get_drvdata(codec->dev->parent);
 
@@ -14387,6 +14449,18 @@ static int tasha_probe(struct platform_device *pdev)
 	tasha_update_reg_defaults(tasha);
 	schedule_work(&tasha->tasha_add_child_devices_work);
 	tasha_get_codec_ver(tasha);
+
+#ifdef CONFIG_SOUND_CONTROL
+	sound_control_kobj = kobject_create_and_add("sound_control", kernel_kobj);
+	if (sound_control_kobj == NULL) {
+		pr_warn("%s kobject create failed!\n", __func__);
+        }
+
+	ret = sysfs_create_group(sound_control_kobj, &sound_control_attr_group);
+        if (ret) {
+		pr_warn("%s sysfs file create failed!\n", __func__);
+	}
+#endif
 
 	dev_info(&pdev->dev, "%s: Tasha driver probe done\n", __func__);
 	return ret;

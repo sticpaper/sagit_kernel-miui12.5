@@ -1,0 +1,4 @@
+config MIUIQ_KERNEL
+	tristate "Enable MIUI Q Sound Kernel"
+	help
+	  Can work normally on MIUI Q.

@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2017, 2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -614,18 +614,20 @@ static bool __rule_unregister(int num_rules, struct bus_rule_type *rule,
 			goto exit_unregister_rule;
 		}
 		match_found = true;
-		list_for_each_entry_safe(node_rule, node_rule_tmp,
+		for (i = 0; i < num_rules; i++) {
+			list_for_each_entry_safe(node_rule, node_rule_tmp,
 					&node->node_rules, link) {
-			if (comp_rules(&node_rule->rule_ops,
+				if (comp_rules(&node_rule->rule_ops,
 					&rule[i]) == 0) {
-				list_del(&node_rule->link);
-				kfree(node_rule);
-				match_found = true;
-				node->num_rules--;
-				list_sort(NULL,
-					&node->node_rules,
-					node_rules_compare);
-				break;
+					list_del(&node_rule->link);
+					kfree(node_rule);
+					match_found = true;
+					node->num_rules--;
+					list_sort(NULL,
+						&node->node_rules,
+						node_rules_compare);
+					break;
+				}
 			}
 		}
 		if (!node->num_rules)
@@ -733,4 +735,3 @@ bool msm_rule_are_rules_registered(void)
 	mutex_unlock(&msm_bus_rules_lock);
 	return ret;
 }
-

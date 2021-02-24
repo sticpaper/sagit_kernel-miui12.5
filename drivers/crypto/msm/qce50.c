@@ -1,6 +1,6 @@
 /* Qualcomm Crypto Engine driver.
  *
- * Copyright (c) 2012-2018, 2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -227,10 +227,8 @@ static int qce_dma_map_sg(struct device *dev, struct scatterlist *sg, int nents,
 {
 	int i;
 
-	for (i = 0; i < nents; ++i) {
+	for_each_sg(sg, sg, nents, i)
 		dma_map_sg(dev, sg, 1, direction);
-		sg = sg_next(sg);
-	}
 
 	return nents;
 }
@@ -240,10 +238,8 @@ static int qce_dma_unmap_sg(struct device *dev, struct scatterlist *sg,
 {
 	int i;
 
-	for (i = 0; i < nents; ++i) {
+	for_each_sg(sg, sg, nents, i)
 		dma_unmap_sg(dev, sg, 1, direction);
-		sg = sg_next(sg);
-	}
 
 	return nents;
 }
@@ -846,11 +842,6 @@ static int _ce_setup_cipher(struct qce_device *pce_dev, struct qce_req *creq,
 	switch (creq->alg) {
 	case CIPHER_ALG_DES:
 		if (creq->mode !=  QCE_MODE_ECB) {
-			if (ivsize > MAX_IV_LENGTH) {
-				pr_err("%s: error: Invalid length parameter\n",
-					 __func__);
-				return -EINVAL;
-			}
 			_byte_stream_to_net_words(enciv32, creq->iv, ivsize);
 			pce = cmdlistinfo->encr_cntr_iv;
 			pce->data = enciv32[0];
@@ -4683,7 +4674,7 @@ again:
 			pce_dev->intr_cadence = 0;
 			atomic_set(&pce_dev->bunch_cmd_seq, 0);
 			atomic_set(&pce_dev->last_intr_seq, 0);
-			pce_dev->cadence_flag = ~pce_dev->cadence_flag;
+			pce_dev->cadence_flag = !pce_dev->cadence_flag;
 		}
 	}
 

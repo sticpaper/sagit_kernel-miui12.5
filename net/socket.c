@@ -3064,8 +3064,9 @@ static int routing_ioctl(struct net *net, struct socket *sock,
 
 	if (sock && sock->sk && sock->sk->sk_family == AF_INET6) { /* ipv6 */
 		struct in6_rtmsg32 __user *ur6 = argp;
-		ret = copy_from_user(&r6.rtmsg_dst, &(ur6->rtmsg_dst),
-			3 * sizeof(struct in6_addr));
+		ret = copy_from_user((u8 *)&r6 + offsetof(typeof(r6), rtmsg_dst),
+				     (u8 *)ur6 + offsetof(typeof(*ur6), rtmsg_dst),
+				     3 * sizeof(r6.rtmsg_dst));
 		ret |= get_user(r6.rtmsg_type, &(ur6->rtmsg_type));
 		ret |= get_user(r6.rtmsg_dst_len, &(ur6->rtmsg_dst_len));
 		ret |= get_user(r6.rtmsg_src_len, &(ur6->rtmsg_src_len));
@@ -3077,8 +3078,9 @@ static int routing_ioctl(struct net *net, struct socket *sock,
 		r = (void *) &r6;
 	} else { /* ipv4 */
 		struct rtentry32 __user *ur4 = argp;
-		ret = copy_from_user(&r4.rt_dst, &(ur4->rt_dst),
-					3 * sizeof(struct sockaddr));
+		ret = copy_from_user((u8 *)&r4 + offsetof(typeof(r4), rt_dst),
+				     (u8 *)ur4 + offsetof(typeof(*ur4), rt_dst),
+				     3 * sizeof(r4.rt_dst));
 		ret |= get_user(r4.rt_flags, &(ur4->rt_flags));
 		ret |= get_user(r4.rt_metric, &(ur4->rt_metric));
 		ret |= get_user(r4.rt_mtu, &(ur4->rt_mtu));
@@ -3378,7 +3380,18 @@ int kernel_sock_shutdown(struct socket *sock, enum sock_shutdown_cmd how)
 }
 EXPORT_SYMBOL(kernel_sock_shutdown);
 
-<<<<<<< HEAD
+int sockev_register_notify(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(&sockev_notifier_list, nb);
+}
+EXPORT_SYMBOL(sockev_register_notify);
+
+int sockev_unregister_notify(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_unregister(&sockev_notifier_list, nb);
+}
+EXPORT_SYMBOL(sockev_unregister_notify);
+
 /* This routine returns the IP overhead imposed by a socket i.e.
  * the length of the underlying IP header, depending on whether
  * this is an IPv4 or IPv6 socket and the length from IP options turned
@@ -3424,16 +3437,3 @@ u32 kernel_sock_ip_overhead(struct sock *sk)
 	}
 }
 EXPORT_SYMBOL(kernel_sock_ip_overhead);
-=======
-int sockev_register_notify(struct notifier_block *nb)
-{
-	return blocking_notifier_chain_register(&sockev_notifier_list, nb);
-}
-EXPORT_SYMBOL(sockev_register_notify);
-
-int sockev_unregister_notify(struct notifier_block *nb)
-{
-	return blocking_notifier_chain_unregister(&sockev_notifier_list, nb);
-}
-EXPORT_SYMBOL(sockev_unregister_notify);
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc
