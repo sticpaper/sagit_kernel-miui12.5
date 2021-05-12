@@ -115,6 +115,32 @@ static struct step_chg_cfg step_chg_config = {
  * range data must be in increasing ranges and shouldn't overlap.
  * Gaps are okay
  */
+#ifdef CONFIG_CHARGE_THERMAL_LIMIT
+static struct jeita_fcc_cfg jeita_fcc_config = {
+	.psy_prop	= POWER_SUPPLY_PROP_TEMP,
+	.prop_name	= "BATT_TEMP",
+	.hysteresis	= 10, /* 1degC hysteresis */
+	.fcc_cfg	= {
+		/* TEMP_LOW	TEMP_HIGH	FCC */
+		{0,		100,		600000},
+		{101,		200,		2000000},
+		{201,		600,		3000000},
+		{601,		660,		600000},
+	},
+};
+
+static struct jeita_fv_cfg jeita_fv_config = {
+	.psy_prop	= POWER_SUPPLY_PROP_TEMP,
+	.prop_name	= "BATT_TEMP",
+	.hysteresis	= 10, /* 1degC hysteresis */
+	.fv_cfg		= {
+		/* TEMP_LOW	TEMP_HIGH	FCC */
+		{0,		100,		4200000},
+		{101,		600,		4400000},
+		{601,		660,		4200000},
+	},
+};
+#else
 static struct jeita_fcc_cfg jeita_fcc_config = {
 	.psy_prop	= POWER_SUPPLY_PROP_TEMP,
 	.prop_name	= "BATT_TEMP",
@@ -139,6 +165,7 @@ static struct jeita_fv_cfg jeita_fv_config = {
 		{451,		550,		4200000},
 	},
 };
+#endif
 
 static bool is_batt_available(struct step_chg_info *chip)
 {

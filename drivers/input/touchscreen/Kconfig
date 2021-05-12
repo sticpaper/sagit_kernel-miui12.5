@@ -13,6 +13,7 @@ if INPUT_TOUCHSCREEN
 
 source "drivers/input/touchscreen/synaptics_dsx/Kconfig"
 source "drivers/input/touchscreen/synaptics_dsx_force/Kconfig"
+source "drivers/input/touchscreen/xiaomi/Kconfig"
 
 config OF_TOUCHSCREEN
 	def_tristate INPUT
@@ -1165,6 +1166,7 @@ config SECURE_TOUCH
 	bool "Secure Touch"
 	depends on (TOUCHSCREEN_SYNAPTICS_I2C_RMI4 || \
 	  TOUCHSCREEN_SYNAPTICS_DSX_I2C_v21)
+	default n
 	help
 	  Say Y here to enable Secure Touch in supported drivers.
 

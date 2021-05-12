@@ -95,7 +95,6 @@ static unsigned long lowmem_deathpending_timeout;
 			pr_info(x);			\
 	} while (0)
 
-
 static DECLARE_WAIT_QUEUE_HEAD(event_wait);
 static DEFINE_SPINLOCK(lmk_event_lock);
 static struct circ_buf event_buffer;
@@ -850,6 +849,5 @@ module_param_array_named(adj, lowmem_adj, short, &lowmem_adj_size,
 #endif
 module_param_array_named(minfree, lowmem_minfree, uint, &lowmem_minfree_size,
 			 S_IRUGO | S_IWUSR);
-module_param_named(debug_level, lowmem_debug_level, uint, S_IRUGO | S_IWUSR);
+module_param_named(debug_level, lowmem_debug_level, uint, 0);
 module_param_named(lmk_fast_run, lmk_fast_run, int, S_IRUGO | S_IWUSR);
-
