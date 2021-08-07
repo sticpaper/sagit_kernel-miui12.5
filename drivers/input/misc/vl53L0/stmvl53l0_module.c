@@ -2878,8 +2878,6 @@ static void __exit stmvl53l0_exit(void)
 MODULE_AUTHOR("STMicroelectronics Imaging Division");
 MODULE_DESCRIPTION("ST FlightSense Time-of-Flight sensor driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION(DRIVER_VERSION);
 
 module_init(stmvl53l0_init);
 module_exit(stmvl53l0_exit);
-

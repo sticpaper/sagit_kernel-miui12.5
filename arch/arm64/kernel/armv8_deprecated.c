@@ -518,7 +518,7 @@ static int cp15barrier_handler(struct pt_regs *regs, u32 instr)
 	}
 
 ret:
-	pr_warn_ratelimited("\"%s\" (%ld) uses deprecated CP15 Barrier instruction at 0x%llx\n",
+	pr_debug_ratelimited("\"%s\" (%ld) uses deprecated CP15 instruction at 0x%llx\n",
 			current->comm, (unsigned long)current->pid, regs->pc);
 
 	regs->pc += 4;
@@ -586,7 +586,7 @@ static int compat_setend_handler(struct pt_regs *regs, u32 big_endian)
 	}
 
 	trace_instruction_emulation(insn, regs->pc);
-	pr_warn_ratelimited("\"%s\" (%ld) uses deprecated setend instruction at 0x%llx\n",
+	pr_debug_ratelimited("\"%s\" (%ld) uses deprecated instruction at 0x%llx\n",
 			current->comm, (unsigned long)current->pid, regs->pc);
 
 	return 0;
@@ -616,7 +616,7 @@ static struct undef_hook setend_hooks[] = {
 	},
 	{
 		/* Thumb mode */
-		.instr_mask	= 0xfffffff7,
+		.instr_mask	= 0x0000fff7,
 		.instr_val	= 0x0000b650,
 		.pstate_mask	= (COMPAT_PSR_T_BIT | COMPAT_PSR_MODE_MASK),
 		.pstate_val	= (COMPAT_PSR_T_BIT | COMPAT_PSR_MODE_USR),

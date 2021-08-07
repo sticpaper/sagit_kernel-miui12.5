@@ -1374,7 +1374,7 @@ static int msm_spi_process_transfer(struct msm_spi *dd)
 	u32 max_speed = 0;
 	u32 read_count;
 	u32 timeout;
-	u32 spi_ioc;
+	u32 spi_ioc = 0;
 	u32 int_loopback = 0;
 	int ret;
 	int status = 0;
@@ -2940,5 +2940,4 @@ static struct platform_driver msm_spi_driver = {
 module_platform_driver(msm_spi_driver);
 
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("0.4");
 MODULE_ALIAS("platform:"SPI_DRV_NAME);

@@ -4,6 +4,7 @@
  * Written by Stephen C. Tweedie <sct@redhat.com>, 1998
  *
  * Copyright 1998 Red Hat corp --- All Rights Reserved
+ * Copyright (C) 2020 XiaoMi, Inc.
  *
  * This file is part of the Linux kernel and is made available under
  * the terms of the GNU General Public License, version 2, or at your
@@ -190,14 +191,15 @@ static int journal_wait_on_commit_record(journal_t *journal,
  * use writepages() because with dealyed allocation we may be doing
  * block allocation in writepages().
  */
-static int journal_submit_inode_data_buffers(struct address_space *mapping)
+static int journal_submit_inode_data_buffers(struct address_space *mapping,
+		loff_t dirty_start, loff_t dirty_end)
 {
 	int ret;
 	struct writeback_control wbc = {
 		.sync_mode =  WB_SYNC_ALL,
 		.nr_to_write = mapping->nrpages * 2,
-		.range_start = 0,
-		.range_end = i_size_read(mapping->host),
+		.range_start = dirty_start,
+		.range_end = dirty_end,
 	};
 
 	ret = generic_writepages(mapping, &wbc);
@@ -221,6 +223,9 @@ static int journal_submit_data_buffers(journal_t *journal,
 
 	spin_lock(&journal->j_list_lock);
 	list_for_each_entry(jinode, &commit_transaction->t_inode_list, i_list) {
+		loff_t dirty_start = jinode->i_dirty_start;
+		loff_t dirty_end = jinode->i_dirty_end;
+
 		mapping = jinode->i_vfs_inode->i_mapping;
 		set_bit(__JI_COMMIT_RUNNING, &jinode->i_flags);
 		spin_unlock(&journal->j_list_lock);
@@ -231,7 +236,8 @@ static int journal_submit_data_buffers(journal_t *journal,
 		 * only allocated blocks here.
 		 */
 		trace_jbd2_submit_inode_data(jinode->i_vfs_inode);
-		err = journal_submit_inode_data_buffers(mapping);
+		err = journal_submit_inode_data_buffers(mapping, dirty_start,
+				dirty_end);
 		if (!ret)
 			ret = err;
 		spin_lock(&journal->j_list_lock);
@@ -258,17 +264,20 @@ static int journal_finish_inode_data_buffers(journal_t *journal,
 	/* For locking, see the comment in journal_submit_data_buffers() */
 	spin_lock(&journal->j_list_lock);
 	list_for_each_entry(jinode, &commit_transaction->t_inode_list, i_list) {
+		loff_t dirty_start = jinode->i_dirty_start;
+		loff_t dirty_end = jinode->i_dirty_end;
+
 		set_bit(__JI_COMMIT_RUNNING, &jinode->i_flags);
 		spin_unlock(&journal->j_list_lock);
-		err = filemap_fdatawait(jinode->i_vfs_inode->i_mapping);
+		err = filemap_fdatawait_range(jinode->i_vfs_inode->i_mapping, dirty_start,
+						dirty_end);
 		if (err) {
 			/*
 			 * Because AS_EIO is cleared by
 			 * filemap_fdatawait_range(), set it again so
 			 * that user process can get -EIO from fsync().
 			 */
-			set_bit(AS_EIO,
-				&jinode->i_vfs_inode->i_mapping->flags);
+			mapping_set_error(jinode->i_vfs_inode->i_mapping, -EIO);
 
 			if (!ret)
 				ret = err;
@@ -286,10 +295,16 @@ static int journal_finish_inode_data_buffers(journal_t *journal,
 		if (jinode->i_next_transaction) {
 			jinode->i_transaction = jinode->i_next_transaction;
 			jinode->i_next_transaction = NULL;
+			jinode->i_dirty_start = jinode->i_next_dirty_start;
+			jinode->i_dirty_end = jinode->i_next_dirty_end;
+			jinode->i_next_dirty_start = 0;
+			jinode->i_next_dirty_end = 0;
 			list_add(&jinode->i_list,
 				&jinode->i_transaction->t_inode_list);
 		} else {
 			jinode->i_transaction = NULL;
+			jinode->i_dirty_start = 0;
+			jinode->i_dirty_end = 0;
 		}
 	}
 	spin_unlock(&journal->j_list_lock);
@@ -797,7 +812,7 @@ start_journal_io:
 		err = journal_submit_commit_record(journal, commit_transaction,
 						 &cbh, crc32_sum);
 		if (err)
-			jbd2_journal_abort(journal, err);
+			__jbd2_journal_abort_hard(journal);
 	}
 
 	blk_finish_plug(&plug);
@@ -890,7 +905,7 @@ start_journal_io:
 		err = journal_submit_commit_record(journal, commit_transaction,
 						&cbh, crc32_sum);
 		if (err)
-			jbd2_journal_abort(journal, err);
+			__jbd2_journal_abort_hard(journal);
 	}
 	if (cbh)
 		err = journal_wait_on_commit_record(journal, cbh);
@@ -987,34 +1002,29 @@ restart_loop:
 		 * it. */
 
 		/*
-		 * A buffer which has been freed while still being journaled
-		 * by a previous transaction, refile the buffer to BJ_Forget of
-		 * the running transaction. If the just committed transaction
-		 * contains "add to orphan" operation, we can completely
-		 * invalidate the buffer now. We are rather through in that
-		 * since the buffer may be still accessible when blocksize <
-		 * pagesize and it is attached to the last partial page.
-		 */
-		if (buffer_freed(bh) && !jh->b_next_transaction) {
-			struct address_space *mapping;
-
-			clear_buffer_freed(bh);
-			clear_buffer_jbddirty(bh);
-
+		* A buffer which has been freed while still being journaled by
+		* a previous transaction.
+		*/
+		if (buffer_freed(bh)) {
 			/*
-			 * Block device buffers need to stay mapped all the
-			 * time, so it is enough to clear buffer_jbddirty and
-			 * buffer_freed bits. For the file mapping buffers (i.e.
-			 * journalled data) we need to unmap buffer and clear
-			 * more bits. We also need to be careful about the check
-			 * because the data page mapping can get cleared under
-			 * our hands. Note that if mapping == NULL, we don't
-			 * need to make buffer unmapped because the page is
-			 * already detached from the mapping and buffers cannot
-			 * get reused.
+			 * If the running transaction is the one containing
+			 * "add to orphan" operation (b_next_transaction !=
+			 * NULL), we have to wait for that transaction to
+			 * commit before we can really get rid of the buffer.
+			 * So just clear b_modified to not confuse transaction
+			 * credit accounting and refile the buffer to
+			 * BJ_Forget of the running transaction. If the just
+			 * committed transaction contains "add to orphan"
+			 * operation, we can completely invalidate the buffer
+			 * now. We are rather through in that since the
+			 * buffer may be still accessible when blocksize <
+			 * pagesize and it is attached to the last partial
+			 * page.
 			 */
-			mapping = READ_ONCE(bh->b_page->mapping);
-			if (mapping && !sb_is_blkdev_sb(mapping->host->i_sb)) {
+			jh->b_modified = 0;
+			if (!jh->b_next_transaction) {
+				clear_buffer_freed(bh);
+				clear_buffer_jbddirty(bh);
 				clear_buffer_mapped(bh);
 				clear_buffer_new(bh);
 				clear_buffer_req(bh);

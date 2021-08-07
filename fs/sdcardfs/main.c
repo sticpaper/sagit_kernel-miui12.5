@@ -268,8 +268,6 @@ static int sdcardfs_read_super(struct vfsmount *mnt, struct super_block *sb,
 	struct sdcardfs_vfsmount_options *mnt_opt = mnt->data;
 	struct inode *inode;
 
-	pr_info("sdcardfs version 2.0\n");
-
 	if (!dev_name) {
 		pr_err("sdcardfs: read_super: missing dev_name argument\n");
 		err = -EINVAL;

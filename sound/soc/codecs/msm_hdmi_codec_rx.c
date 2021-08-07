@@ -559,5 +559,4 @@ static void __exit msm_ext_disp_audio_codec_rx_exit(void)
 module_exit(msm_ext_disp_audio_codec_rx_exit);
 
 MODULE_DESCRIPTION("MSM External Display Audio CODEC Driver");
-MODULE_VERSION("1.0");
 MODULE_LICENSE("GPL v2");

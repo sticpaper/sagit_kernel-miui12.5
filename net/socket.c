@@ -469,7 +469,7 @@ static struct socket *sockfd_lookup_light(int fd, int *err, int *fput_needed)
 	if (f.file) {
 		sock = sock_from_file(f.file, err);
 		if (likely(sock)) {
-			*fput_needed = f.flags & FDPUT_FPUT;
+			*fput_needed = f.flags;
 			return sock;
 		}
 		fdput(f);
@@ -3064,8 +3064,9 @@ static int routing_ioctl(struct net *net, struct socket *sock,
 
 	if (sock && sock->sk && sock->sk->sk_family == AF_INET6) { /* ipv6 */
 		struct in6_rtmsg32 __user *ur6 = argp;
-		ret = copy_from_user(&r6.rtmsg_dst, &(ur6->rtmsg_dst),
-			3 * sizeof(struct in6_addr));
+		ret = copy_from_user((u8 *)&r6 + offsetof(typeof(r6), rtmsg_dst),
+				     (u8 *)ur6 + offsetof(typeof(*ur6), rtmsg_dst),
+				     3 * sizeof(r6.rtmsg_dst));
 		ret |= get_user(r6.rtmsg_type, &(ur6->rtmsg_type));
 		ret |= get_user(r6.rtmsg_dst_len, &(ur6->rtmsg_dst_len));
 		ret |= get_user(r6.rtmsg_src_len, &(ur6->rtmsg_src_len));
@@ -3077,8 +3078,9 @@ static int routing_ioctl(struct net *net, struct socket *sock,
 		r = (void *) &r6;
 	} else { /* ipv4 */
 		struct rtentry32 __user *ur4 = argp;
-		ret = copy_from_user(&r4.rt_dst, &(ur4->rt_dst),
-					3 * sizeof(struct sockaddr));
+		ret = copy_from_user((u8 *)&r4 + offsetof(typeof(r4), rt_dst),
+				     (u8 *)ur4 + offsetof(typeof(*ur4), rt_dst),
+				     3 * sizeof(r4.rt_dst));
 		ret |= get_user(r4.rt_flags, &(ur4->rt_flags));
 		ret |= get_user(r4.rt_metric, &(ur4->rt_metric));
 		ret |= get_user(r4.rt_mtu, &(ur4->rt_mtu));
@@ -3216,7 +3218,6 @@ static int compat_sock_ioctl_trans(struct file *file, struct socket *sock,
 	case SIOCSARP:
 	case SIOCGARP:
 	case SIOCDARP:
-	case SIOCOUTQNSD:
 	case SIOCATMARK:
 		return sock_do_ioctl(net, sock, cmd, arg);
 	}
@@ -3378,53 +3379,6 @@ int kernel_sock_shutdown(struct socket *sock, enum sock_shutdown_cmd how)
 }
 EXPORT_SYMBOL(kernel_sock_shutdown);
 
-<<<<<<< HEAD
-/* This routine returns the IP overhead imposed by a socket i.e.
- * the length of the underlying IP header, depending on whether
- * this is an IPv4 or IPv6 socket and the length from IP options turned
- * on at the socket. Assumes that the caller has a lock on the socket.
- */
-u32 kernel_sock_ip_overhead(struct sock *sk)
-{
-	struct inet_sock *inet;
-	struct ip_options_rcu *opt;
-	u32 overhead = 0;
-	bool owned_by_user;
-#if IS_ENABLED(CONFIG_IPV6)
-	struct ipv6_pinfo *np;
-	struct ipv6_txoptions *optv6 = NULL;
-#endif /* IS_ENABLED(CONFIG_IPV6) */
-
-	if (!sk)
-		return overhead;
-
-	owned_by_user = sock_owned_by_user(sk);
-	switch (sk->sk_family) {
-	case AF_INET:
-		inet = inet_sk(sk);
-		overhead += sizeof(struct iphdr);
-		opt = rcu_dereference_protected(inet->inet_opt,
-						owned_by_user);
-		if (opt)
-			overhead += opt->opt.optlen;
-		return overhead;
-#if IS_ENABLED(CONFIG_IPV6)
-	case AF_INET6:
-		np = inet6_sk(sk);
-		overhead += sizeof(struct ipv6hdr);
-		if (np)
-			optv6 = rcu_dereference_protected(np->opt,
-							  owned_by_user);
-		if (optv6)
-			overhead += (optv6->opt_flen + optv6->opt_nflen);
-		return overhead;
-#endif /* IS_ENABLED(CONFIG_IPV6) */
-	default: /* Returns 0 overhead if the socket is not ipv4 or ipv6 */
-		return overhead;
-	}
-}
-EXPORT_SYMBOL(kernel_sock_ip_overhead);
-=======
 int sockev_register_notify(struct notifier_block *nb)
 {
 	return blocking_notifier_chain_register(&sockev_notifier_list, nb);
@@ -3436,4 +3390,3 @@ int sockev_unregister_notify(struct notifier_block *nb)
 	return blocking_notifier_chain_unregister(&sockev_notifier_list, nb);
 }
 EXPORT_SYMBOL(sockev_unregister_notify);
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc

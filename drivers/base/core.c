@@ -717,6 +717,8 @@ void device_initialize(struct device *dev)
 #ifdef CONFIG_GENERIC_MSI_IRQ
 	INIT_LIST_HEAD(&dev->msi_list);
 #endif
+	INIT_LIST_HEAD(&dev->iommu_map_list);
+	mutex_init(&dev->iommu_map_lock);
 }
 EXPORT_SYMBOL_GPL(device_initialize);
 
@@ -1576,6 +1578,7 @@ int __init devices_init(void)
 	return -ENOMEM;
 }
 
+#if 0
 static int device_check_offline(struct device *dev, void *not_used)
 {
 	int ret;
@@ -1586,6 +1589,7 @@ static int device_check_offline(struct device *dev, void *not_used)
 
 	return device_supports_offline(dev) && !dev->offline ? -EBUSY : 0;
 }
+#endif
 
 /**
  * device_offline - Prepare the device for hot-removal.
@@ -1600,8 +1604,9 @@ static int device_check_offline(struct device *dev, void *not_used)
  */
 int device_offline(struct device *dev)
 {
-	int ret;
+	int ret = 0;
 
+#if 0
 	if (dev->offline_disabled)
 		return -EPERM;
 
@@ -1622,6 +1627,7 @@ int device_offline(struct device *dev)
 		}
 	}
 	device_unlock(dev);
+#endif
 
 	return ret;
 }
@@ -1640,6 +1646,7 @@ int device_online(struct device *dev)
 {
 	int ret = 0;
 
+#if 0
 	device_lock(dev);
 	if (device_supports_offline(dev)) {
 		if (dev->offline) {
@@ -1653,6 +1660,7 @@ int device_online(struct device *dev)
 		}
 	}
 	device_unlock(dev);
+#endif
 
 	return ret;
 }
@@ -2349,23 +2357,17 @@ static inline bool fwnode_is_primary(struct fwnode_handle *fwnode)
  */
 void set_primary_fwnode(struct device *dev, struct fwnode_handle *fwnode)
 {
-	struct device *parent = dev->parent;
-	struct fwnode_handle *fn = dev->fwnode;
-
 	if (fwnode) {
+		struct fwnode_handle *fn = dev->fwnode;
+
 		if (fwnode_is_primary(fn))
 			fn = fn->secondary;
 
 		fwnode->secondary = fn;
 		dev->fwnode = fwnode;
 	} else {
-		if (fwnode_is_primary(fn)) {
-			dev->fwnode = fn->secondary;
-			if (!(parent && fn == parent->fwnode))
-				fn->secondary = NULL;
-		} else {
-			dev->fwnode = NULL;
-		}
+		dev->fwnode = fwnode_is_primary(dev->fwnode) ?
+			dev->fwnode->secondary : NULL;
 	}
 }
 EXPORT_SYMBOL_GPL(set_primary_fwnode);

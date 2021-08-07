@@ -54,6 +54,8 @@ static LIST_HEAD(deferred_probe_pending_list);
 static LIST_HEAD(deferred_probe_active_list);
 static struct workqueue_struct *deferred_wq;
 static atomic_t deferred_trigger_count = ATOMIC_INIT(0);
+static bool driver_deferred_probe_enable = false;
+static void driver_deferred_probe_trigger(void);
 
 /*
  * deferred_probe_work_func() - Retry probing devices in the active list.
@@ -107,6 +109,11 @@ static void deferred_probe_work_func(struct work_struct *work)
 		put_device(dev);
 	}
 	mutex_unlock(&deferred_probe_mutex);
+
+	/* Keep going if probe deferral is needed after late_initcall */
+	if (driver_deferred_probe_enable &&
+	    !list_empty(&deferred_probe_pending_list))
+		driver_deferred_probe_trigger();
 }
 static DECLARE_WORK(deferred_probe_work, deferred_probe_work_func);
 
@@ -130,7 +137,6 @@ void driver_deferred_probe_del(struct device *dev)
 	mutex_unlock(&deferred_probe_mutex);
 }
 
-static bool driver_deferred_probe_enable = false;
 /**
  * driver_deferred_probe_trigger() - Kick off re-probing deferred devices
  *
@@ -309,11 +315,7 @@ static int really_probe(struct device *dev, struct device_driver *drv)
 	atomic_inc(&probe_count);
 	pr_debug("bus: '%s': %s: probing driver %s with device %s\n",
 		 drv->bus->name, __func__, drv->name, dev_name(dev));
-	if (!list_empty(&dev->devres_head)) {
-		dev_crit(dev, "Resources present before probing\n");
-		ret = -EBUSY;
-		goto done;
-	}
+	WARN_ON(!list_empty(&dev->devres_head));
 
 	dev->driver = drv;
 
@@ -390,7 +392,7 @@ probe_failed:
 	ret = 0;
 done:
 	atomic_dec(&probe_count);
-	wake_up_all(&probe_waitqueue);
+	wake_up(&probe_waitqueue);
 	return ret;
 }
 

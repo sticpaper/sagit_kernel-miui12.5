@@ -777,17 +777,11 @@ static int gs_start_io(struct gs_port *port)
 	port->n_read = 0;
 	started = gs_start_rx(port);
 
-<<<<<<< HEAD
-=======
 	if (!port->port_usb)
 		return -EIO;
 
 	/* unblock any pending writes into our circular buffer */
->>>>>>> 5325fdd62a55273df91abb561c8b9ea71d12bbfc
 	if (started) {
-		gs_start_tx(port);
-		/* Unblock any pending writes into our circular buffer, in case
-		 * we didn't in gs_start_tx() */
 		tty_wakeup(port->port.tty);
 	} else {
 		gs_free_requests(ep, head, &port->read_allocated);

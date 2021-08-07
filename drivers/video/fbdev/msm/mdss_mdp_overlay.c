@@ -1,5 +1,5 @@
 /* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
- *
+ * Copyright (C) 2018 XiaoMi, Inc.
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
  * only version 2 as published by the Free Software Foundation.
@@ -2606,6 +2606,7 @@ int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd,
 		commit_cb.data = mfd;
 		ret = mdss_mdp_display_commit(mdp5_data->ctl, NULL,
 			&commit_cb);
+		ctl->panel_data->panel_info.kickoff_count++;
 		ATRACE_END("display_commit");
 	}
 	__vsync_set_vsync_handler(mfd);
@@ -5254,6 +5255,7 @@ static int __handle_overlay_prepare(struct msm_fb_data_type *mfd,
 		sorted_ovs = kzalloc(num_ovs * sizeof(*ip_ovs), GFP_KERNEL);
 		if (!sorted_ovs) {
 			pr_err("error allocating ovlist mem\n");
+			mutex_unlock(&mdp5_data->ov_lock);
 			return -ENOMEM;
 		}
 		memcpy(sorted_ovs, ip_ovs, num_ovs * sizeof(*ip_ovs));
@@ -5261,6 +5263,7 @@ static int __handle_overlay_prepare(struct msm_fb_data_type *mfd,
 		if (ret) {
 			pr_err("src_split_sort failed. ret=%d\n", ret);
 			kfree(sorted_ovs);
+			mutex_unlock(&mdp5_data->ov_lock);
 			return ret;
 		}
 	}
@@ -6275,7 +6278,7 @@ static int __vsync_retire_setup(struct msm_fb_data_type *mfd)
 	init_kthread_worker(&mdp5_data->worker);
 	init_kthread_work(&mdp5_data->vsync_work, __vsync_retire_work_handler);
 
-	mdp5_data->thread = kthread_run(kthread_worker_fn,
+	mdp5_data->thread = kthread_run_perf_critical(kthread_worker_fn,
 					&mdp5_data->worker, "vsync_retire_work");
 
 	if (IS_ERR(mdp5_data->thread)) {

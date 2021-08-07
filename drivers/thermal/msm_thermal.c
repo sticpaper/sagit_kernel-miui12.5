@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1272,8 +1272,10 @@ static int create_thermal_debugfs(void)
 			0600, msm_therm_debugfs->parent, &tsens_temp_print);
 	if (IS_ERR(msm_therm_debugfs->tsens_print)) {
 		ret = PTR_ERR(msm_therm_debugfs->tsens_print);
+#ifdef CONFIG_DEBUG_FS
 		pr_err("Error creating debugfs:[%s]. err:%d\n",
 			MSM_TSENS_PRINT, ret);
+#endif
 		goto create_exit;
 	}
 
@@ -3171,7 +3173,8 @@ static int __ref update_offline_cores(int val)
 
 	if (pend_hotplug_req && !in_suspend && !retry_in_progress) {
 		retry_in_progress = true;
-		schedule_delayed_work(&retry_hotplug_work,
+		queue_delayed_work(system_power_efficient_wq,
+			&retry_hotplug_work,
 			msecs_to_jiffies(HOTPLUG_RETRY_INTERVAL_MS));
 	}
 
@@ -3665,8 +3668,9 @@ static void check_temp(struct work_struct *work)
 
 reschedule:
 	if (polling_enabled)
-		schedule_delayed_work(&check_temp_work,
-				msecs_to_jiffies(msm_thermal_info.poll_ms));
+		queue_delayed_work(system_power_efficient_wq,
+			&check_temp_work,
+			msecs_to_jiffies(msm_thermal_info.poll_ms));
 }
 
 static int __ref msm_thermal_cpu_callback(struct notifier_block *nfb,
@@ -6293,7 +6297,7 @@ static int fetch_cpu_mitigaiton_info(struct msm_thermal_data *data,
 		struct platform_device *pdev)
 {
 
-	int _cpu = 0, err = 0, sensor_name_len = 0;
+	int _cpu = 0, err = 0;
 	struct device_node *cpu_node = NULL, *limits = NULL, *tsens = NULL;
 	char *key = NULL;
 	struct device_node *node = pdev->dev.of_node;
@@ -6351,9 +6355,8 @@ static int fetch_cpu_mitigaiton_info(struct msm_thermal_data *data,
 			err = -ENOMEM;
 			goto fetch_mitig_exit;
 		}
-		sensor_name_len = strlen(sensor_name);
-		strlcpy((char *) cpus[_cpu].sensor_type, sensor_name,
-			sensor_name_len + 1);
+		strscpy((char *)cpus[_cpu].sensor_type, sensor_name,
+			sizeof(cpus[_cpu].sensor_type));
 		create_alias_name(_cpu, limits, pdev);
 	}
 
@@ -7583,7 +7586,7 @@ int __init msm_thermal_device_init(void)
 {
 	return platform_driver_register(&msm_thermal_device_driver);
 }
-arch_initcall(msm_thermal_device_init);
+subsys_initcall(msm_thermal_device_init);
 
 int __init msm_thermal_late_init(void)
 {

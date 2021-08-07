@@ -3169,13 +3169,11 @@ fail:
 	btrfs_free_path(path);
 out_unlock:
 	mutex_unlock(&BTRFS_I(dir)->log_mutex);
-	if (err == -ENOSPC) {
+	if (ret == -ENOSPC) {
 		btrfs_set_log_full_commit(root->fs_info, trans);
-		err = 0;
-	} else if (err < 0 && err != -ENOENT) {
-		/* ENOENT can be returned if the entry hasn't been fsynced yet */
-		btrfs_abort_transaction(trans, root, err);
-	}
+		ret = 0;
+	} else if (ret < 0)
+		btrfs_abort_transaction(trans, root, ret);
 
 	btrfs_end_log_trans(root);
 
@@ -3335,7 +3333,6 @@ static noinline int log_dir_items(struct btrfs_trans_handle *trans,
 	 * search and this search we'll not find the key again and can just
 	 * bail.
 	 */
-search:
 	ret = btrfs_search_slot(NULL, root, &min_key, path, 0, 0);
 	if (ret != 0)
 		goto done;
@@ -3355,13 +3352,6 @@ search:
 
 			if (min_key.objectid != ino || min_key.type != key_type)
 				goto done;
-
-			if (need_resched()) {
-				btrfs_release_path(path);
-				cond_resched();
-				goto search;
-			}
-
 			ret = overwrite_item(trans, log, dst_path, src, i,
 					     &min_key);
 			if (ret) {
@@ -3677,7 +3667,7 @@ static noinline int copy_items(struct btrfs_trans_handle *trans,
 
 		src_offset = btrfs_item_ptr_offset(src, start_slot + i);
 
-		if (i == nr - 1)
+		if ((i == (nr - 1)))
 			last_key = ins_keys[i];
 
 		if (ins_keys[i].type == BTRFS_INODE_ITEM_KEY) {
@@ -3743,8 +3733,11 @@ static noinline int copy_items(struct btrfs_trans_handle *trans,
 						log->fs_info->csum_root,
 						ds + cs, ds + cs + cl - 1,
 						&ordered_sums, 0);
-				if (ret)
-					break;
+				if (ret) {
+					btrfs_release_path(dst_path);
+					kfree(ins_data);
+					return ret;
+				}
 			}
 		}
 	}
@@ -3757,6 +3750,7 @@ static noinline int copy_items(struct btrfs_trans_handle *trans,
 	 * we have to do this after the loop above to avoid changing the
 	 * log tree while trying to change the log tree.
 	 */
+	ret = 0;
 	while (!list_empty(&ordered_sums)) {
 		struct btrfs_ordered_sum *sums = list_entry(ordered_sums.next,
 						   struct btrfs_ordered_sum,
@@ -4410,8 +4404,13 @@ static int btrfs_log_trailing_hole(struct btrfs_trans_handle *trans,
 					struct btrfs_file_extent_item);
 
 		if (btrfs_file_extent_type(leaf, extent) ==
-		    BTRFS_FILE_EXTENT_INLINE)
+		    BTRFS_FILE_EXTENT_INLINE) {
+			len = btrfs_file_extent_inline_len(leaf,
+							   path->slots[0],
+							   extent);
+			ASSERT(len == i_size);
 			return 0;
+		}
 
 		len = btrfs_file_extent_num_bytes(leaf, extent);
 		/* Last extent goes beyond i_size, no need to log a hole. */
@@ -5697,21 +5696,6 @@ void btrfs_record_unlink_dir(struct btrfs_trans_handle *trans,
 	return;
 
 record:
-	BTRFS_I(dir)->last_unlink_trans = trans->transid;
-}
-
-/*
- * Make sure that if someone attempts to fsync the parent directory of a deleted
- * snapshot, it ends up triggering a transaction commit. This is to guarantee
- * that after replaying the log tree of the parent directory's root we will not
- * see the snapshot anymore and at log replay time we will not see any log tree
- * corresponding to the deleted snapshot's root, which could lead to replaying
- * it after replaying the log tree of the parent directory (which would replay
- * the snapshot delete operation).
- */
-void btrfs_record_snapshot_destroy(struct btrfs_trans_handle *trans,
-				   struct inode *dir)
-{
 	BTRFS_I(dir)->last_unlink_trans = trans->transid;
 }
 

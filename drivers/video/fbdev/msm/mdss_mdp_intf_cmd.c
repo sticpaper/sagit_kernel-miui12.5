@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2018, 2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1228,12 +1228,11 @@ static int mdss_mdp_cmd_intf_callback(void *data, int event)
 			__func__, atomic_read(&ctx->rdptr_cnt), event);
 
 		/*
-		 * if we are going to suspended, just return
+		 * if we are going to suspended or pp split is not enabled,
+		 * just return
 		 */
-		if (ctx->intf_stopped) {
-			pr_debug("%s: Intf stopped\n", __func__);
+		if (ctx->intf_stopped || !is_pingpong_split(ctx->ctl->mfd))
 			return -EINVAL;
-		}
 		atomic_inc(&ctx->rdptr_cnt);
 
 		/* enable clks and rd_ptr interrupt */
@@ -1380,6 +1379,7 @@ static void mdss_mdp_cmd_pingpong_done(void *arg)
 		return;
 	}
 
+	vsync_time = ktime_get();
 	mdss_mdp_ctl_perf_set_transaction_status(ctl,
 		PERF_HW_MDP_STATE, PERF_STATUS_DONE);
 
@@ -2100,7 +2100,7 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 	struct mdss_mdp_cmd_ctx *ctx;
 	struct mdss_panel_data *pdata;
 	unsigned long flags;
-	int rc = 0;
+	int rc = 0, te_irq;
 
 	ctx = (struct mdss_mdp_cmd_ctx *) ctl->intf_ctx[MASTER_CTX];
 	if (!ctx) {
@@ -2156,7 +2156,8 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 				atomic_read(&ctx->koff_cnt));
 
 		/* enable TE irq to check if it is coming from the panel */
-		panel_update_te_irq(pdata, true);
+		te_irq = gpio_to_irq(pdata->panel_te_gpio);
+		enable_irq(te_irq);
 
 		/* wait for 20ms to ensure we are getting the next TE */
 		usleep_range(20000, 20010);
@@ -2179,7 +2180,7 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 		}
 
 		/* disable te irq */
-		panel_update_te_irq(pdata, false);
+		disable_irq_nosync(te_irq);
 
 		ctx->pp_timeout_report_cnt++;
 		rc = -EPERM;
@@ -3138,6 +3139,13 @@ static int mdss_mdp_cmd_kickoff(struct mdss_mdp_ctl *ctl, void *arg)
 		else if (ctx->lineptr_enabled)
 			mdss_mdp_cmd_lineptr_ctrl(ctl, false);
 	}
+
+#ifdef CONFIG_MACH_SAGIT
+	/* Don't let the CPU servicing the MDP IRQs enter deep idle */
+	if (!cancel_work_sync(&mdata->pm_unset_work))
+		pm_qos_update_request(&mdata->pm_irq_req, 100);
+	WRITE_ONCE(mdata->pm_irq_set, true);
+#endif
 
 	/* Kickoff */
 	__mdss_mdp_kickoff(ctl, sctl, ctx);

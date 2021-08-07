@@ -101,6 +101,7 @@ static inline int avc_hash(u32 ssid, u32 tsid, u16 tclass)
 	return (ssid ^ (tsid<<2) ^ (tclass<<4)) & (AVC_CACHE_SLOTS - 1);
 }
 
+#ifdef CONFIG_AUDIT
 /**
  * avc_dump_av - Display an access vector in human-readable form.
  * @tclass: target security class
@@ -147,27 +148,27 @@ static void avc_dump_query(struct audit_buffer *ab, u32 ssid, u32 tsid, u16 tcla
 {
 	int rc;
 	char *scontext;
+	char buf[SELINUX_LABEL_LENGTH];
 	u32 scontext_len;
 
-	rc = security_sid_to_context(ssid, &scontext, &scontext_len);
+	scontext = buf;
+
+	rc = security_sid_to_context_stack(ssid, &scontext, &scontext_len);
 	if (rc)
 		audit_log_format(ab, "ssid=%d", ssid);
-	else {
+	else
 		audit_log_format(ab, "scontext=%s", scontext);
-		kfree(scontext);
-	}
 
-	rc = security_sid_to_context(tsid, &scontext, &scontext_len);
+	rc = security_sid_to_context_stack(tsid, &scontext, &scontext_len);
 	if (rc)
 		audit_log_format(ab, " tsid=%d", tsid);
-	else {
+	else
 		audit_log_format(ab, " tcontext=%s", scontext);
-		kfree(scontext);
-	}
 
 	BUG_ON(!tclass || tclass >= ARRAY_SIZE(secclass_map));
 	audit_log_format(ab, " tclass=%s", secclass_map[tclass-1].name);
 }
+#endif
 
 /**
  * avc_init - Initialize the AVC.
@@ -470,6 +471,7 @@ static inline int avc_xperms_audit(u32 ssid, u32 tsid, u16 tclass,
 				u8 perm, int result,
 				struct common_audit_data *ad)
 {
+#ifdef CONFIG_AUDIT
 	u32 audited, denied;
 
 	audited = avc_xperms_audit_required(
@@ -478,6 +480,9 @@ static inline int avc_xperms_audit(u32 ssid, u32 tsid, u16 tclass,
 		return 0;
 	return slow_avc_audit(ssid, tsid, tclass, requested,
 			audited, denied, result, ad, 0);
+#else
+	return 0;
+#endif
 }
 
 static void avc_node_free(struct rcu_head *rhead)
@@ -700,6 +705,7 @@ out:
 	return node;
 }
 
+#ifdef CONFIG_AUDIT
 /**
  * avc_audit_pre_callback - SELinux specific information
  * will be called by generic audit code
@@ -773,6 +779,7 @@ noinline int slow_avc_audit(u32 ssid, u32 tsid, u16 tclass,
 	common_lsm_audit(a, avc_audit_pre_callback, avc_audit_post_callback);
 	return 0;
 }
+#endif
 
 /**
  * avc_add_callback - Register a callback for security events.
@@ -865,7 +872,7 @@ static int avc_update_node(u32 event, u32 perms, u8 driver, u8 xperm, u32 ssid,
 	if (orig->ae.xp_node) {
 		rc = avc_xperms_populate(node, orig->ae.xp_node);
 		if (rc) {
-			avc_node_kill(node);
+			kmem_cache_free(avc_node_cachep, node);
 			goto out_unlock;
 		}
 	}

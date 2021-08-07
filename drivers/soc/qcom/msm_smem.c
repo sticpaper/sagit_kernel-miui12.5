@@ -1332,16 +1332,18 @@ static void smem_init_security_partition(struct smem_toc_entry *entry,
 		LOG_ERR("Smem partition %d hosts don't match TOC\n", num);
 		BUG();
 	}
-	if (hdr->host0 != remote_host && hdr->host1 != remote_host) {
+	if (!is_comm_partition && hdr->host0 != remote_host && hdr->host1 != remote_host) {
 		LOG_ERR("Smem partition %d hosts don't match TOC\n", num);
 		BUG();
 	}
 
-	partitions[remote_host].partition_num = num;
-	partitions[remote_host].offset = entry->offset;
-	partitions[remote_host].size_cacheline = entry->size_cacheline;
-	SMEM_INFO("Partition %d offset:%x remote:%d\n", num, entry->offset,
-								remote_host);
+	if (!is_comm_partition) {
+		partitions[remote_host].partition_num = num;
+		partitions[remote_host].offset = entry->offset;
+		partitions[remote_host].size_cacheline = entry->size_cacheline;
+		SMEM_INFO("Partition %d offset:%x remote:%d\n", num, entry->offset,
+			remote_host);
+	}
 }
 
 /**
@@ -1642,12 +1644,13 @@ int __init msm_smem_init(void)
 
 	registered = true;
 	smem_max_items = SMEM_NUM_ITEMS;
+#ifdef CONFIG_IPC_LOGGING
 	smem_ipc_log_ctx = ipc_log_context_create(NUM_LOG_PAGES, "smem", 0);
 	if (!smem_ipc_log_ctx) {
 		pr_err("%s: unable to create logging context\n", __func__);
 		msm_smem_debug_mask = 0;
 	}
-
+#endif
 	rc = platform_driver_register(&msm_smem_driver);
 	if (rc) {
 		LOG_ERR("%s: msm_smem_driver register failed %d\n",

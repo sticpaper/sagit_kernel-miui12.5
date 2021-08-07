@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2018,2020 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1988,7 +1988,7 @@ struct wcd_cpe_core *wcd_cpe_init(const char *img_fname,
 
 	card = codec->component.card->snd_card;
 	snprintf(proc_name, sizeof(proc_name), "%s%d%s", cpe_name, id,
-		state_name);
+		 state_name);
 	entry = snd_info_create_card_entry(card, proc_name,
 					   card->proc_root);
 	if (entry) {
@@ -2916,7 +2916,7 @@ static int wcd_cpe_send_param_snd_model(struct wcd_cpe_core *core,
 	struct cmi_obm_msg obm_msg;
 	struct cpe_param_data *param_d;
 
-
+	obm_msg.hdr.hdr_info = 0;
 	ret = fill_cmi_header(&obm_msg.hdr, session->id,
 			CMI_CPE_LSM_SERVICE_ID, 0, 20,
 			CPE_LSM_SESSION_CMD_SET_PARAMS_V2, true);

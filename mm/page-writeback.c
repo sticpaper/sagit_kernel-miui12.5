@@ -200,11 +200,11 @@ static void wb_min_max_ratio(struct bdi_writeback *wb,
 	if (this_bw < tot_bw) {
 		if (min) {
 			min *= this_bw;
-			min = div64_ul(min, tot_bw);
+			do_div(min, tot_bw);
 		}
 		if (max < 100) {
 			max *= this_bw;
-			max = div64_ul(max, tot_bw);
+			do_div(max, tot_bw);
 		}
 	}
 
@@ -371,7 +371,7 @@ static void domain_dirty_limits(struct dirty_throttle_control *dtc)
 	unsigned long bg_bytes = dirty_background_bytes;
 	/* convert ratios to per-PAGE_SIZE for higher precision */
 	unsigned long ratio = (vm_dirty_ratio * PAGE_SIZE) / 100;
-	unsigned long bg_ratio = (dirty_background_ratio * PAGE_SIZE) / 100;
+	unsigned long bg_ratio = (10 * PAGE_SIZE) / 100;
 	unsigned long thresh;
 	unsigned long bg_thresh;
 	struct task_struct *tsk;
@@ -551,7 +551,7 @@ static void wb_domain_writeout_inc(struct wb_domain *dom,
 	__fprop_inc_percpu_max(&dom->completions, completions,
 			       max_prop_frac);
 	/* First event after period switching was turned off? */
-	if (!unlikely(dom->period_time)) {
+	if (unlikely(!dom->period_time)) {
 		/*
 		 * We can race with other __bdi_writeout_inc calls here but
 		 * it does not cause any harm since the resulting time when

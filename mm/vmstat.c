@@ -1383,7 +1383,7 @@ static const struct file_operations proc_vmstat_file_operations = {
 #ifdef CONFIG_SMP
 static struct workqueue_struct *vmstat_wq;
 static DEFINE_PER_CPU(struct delayed_work, vmstat_work);
-int sysctl_stat_interval __read_mostly = HZ;
+int sysctl_stat_interval __read_mostly = 10 * HZ;
 static cpumask_var_t cpu_stat_off;
 
 static void vmstat_update(struct work_struct *w)
@@ -1445,7 +1445,7 @@ static bool need_update(int cpu)
 
 void quiet_vmstat(void)
 {
-	if (system_state != SYSTEM_RUNNING)
+	if (unlikely(system_state != SYSTEM_RUNNING))
 		return;
 
 	/*
@@ -1455,7 +1455,7 @@ void quiet_vmstat(void)
 	if (cpumask_test_and_set_cpu(smp_processor_id(), cpu_stat_off))
 		return;
 
-	if (!need_update(smp_processor_id()))
+	if (likely(!need_update(smp_processor_id())))
 		return;
 
 	/*
@@ -1501,7 +1501,7 @@ static void vmstat_shepherd(struct work_struct *w)
 	}
 	put_online_cpus();
 
-	schedule_delayed_work(&shepherd,
+	queue_delayed_work(system_power_efficient_wq, &shepherd,
 		round_jiffies_relative(sysctl_stat_interval));
 }
 
@@ -1518,7 +1518,7 @@ static void __init start_shepherd_timer(void)
 	cpumask_copy(cpu_stat_off, cpu_online_mask);
 
 	vmstat_wq = alloc_workqueue("vmstat", WQ_FREEZABLE|WQ_MEM_RECLAIM, 0);
-	schedule_delayed_work(&shepherd,
+	queue_delayed_work(system_power_efficient_wq, &shepherd,
 		round_jiffies_relative(sysctl_stat_interval));
 }
 

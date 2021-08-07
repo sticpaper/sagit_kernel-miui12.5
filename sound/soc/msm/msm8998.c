@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -41,6 +41,12 @@
 #include "../codecs/wcd934x/wcd934x-mbhc.h"
 #include "../codecs/wsa881x.h"
 
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+#include <soc/qcom/socinfo.h>
+#include <linux/mfd/spk-id.h>
+#include "../codecs/usb-headset.h"
+#endif
+
 #define DRV_NAME "msm8998-asoc-snd"
 
 #define __CHIPSET__ "MSM8998 "
@@ -76,30 +82,6 @@
 #define TDM_SLOT_OFFSET_MAX 32
 
 #define MSM_HIFI_ON 1
-
-enum {
-	PRIMARY_TDM_RX_0,
-	PRIMARY_TDM_RX_1,
-	PRIMARY_TDM_RX_2,
-	PRIMARY_TDM_RX_3,
-	PRIMARY_TDM_RX_4,
-	PRIMARY_TDM_RX_5,
-	PRIMARY_TDM_RX_6,
-	PRIMARY_TDM_RX_7,
-	TDM_MAX_RX,
-};
-
-enum {
-	PRIMARY_TDM_TX_0,
-	PRIMARY_TDM_TX_1,
-	PRIMARY_TDM_TX_2,
-	PRIMARY_TDM_TX_3,
-	PRIMARY_TDM_TX_4,
-	PRIMARY_TDM_TX_5,
-	PRIMARY_TDM_TX_6,
-	PRIMARY_TDM_TX_7,
-	TDM_MAX_TX,
-};
 
 enum {
 	SLIM_RX_0 = 0,
@@ -206,6 +188,12 @@ struct msm_asoc_mach_data {
 	struct device_node *hph_en0_gpio_p; /* used by pinctrl API */
 	struct snd_info_entry *codec_root;
 	struct msm_pinctrl_info pinctrl_info;
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+	struct device_node *spk_id_gpio_p;
+	struct device_node *rcv_id_gpio_p;
+	struct regulator *us_p_power;
+	struct regulator *us_n_power;
+#endif
 };
 
 struct msm_asoc_wcd93xx_codec {
@@ -330,10 +318,26 @@ static struct dev_config tdm_tx_cfg[TDM_INTERFACE_MAX][TDM_PORT_MAX] = {
 	}
 };
 
+/*TDM default offset currently only supporting TDM_RX_0 and TDM_TX_0 */
+static unsigned int tdm_slot_offset[TDM_PORT_MAX][TDM_SLOT_OFFSET_MAX] = {
+	{0, 4, 8, 12, 16, 20, 24, 28},/* TX_0 | RX_0 */
+	{AFE_SLOT_MAPPING_OFFSET_INVALID},/* TX_1 | RX_1 */
+	{AFE_SLOT_MAPPING_OFFSET_INVALID},/* TX_2 | RX_2 */
+	{AFE_SLOT_MAPPING_OFFSET_INVALID},/* TX_3 | RX_3 */
+	{AFE_SLOT_MAPPING_OFFSET_INVALID},/* TX_4 | RX_4 */
+	{AFE_SLOT_MAPPING_OFFSET_INVALID},/* TX_5 | RX_5 */
+	{AFE_SLOT_MAPPING_OFFSET_INVALID},/* TX_6 | RX_6 */
+	{AFE_SLOT_MAPPING_OFFSET_INVALID},/* TX_7 | RX_7 */
+};
+
 /* Default configuration of slimbus channels */
 static struct dev_config slim_rx_cfg[] = {
 	[SLIM_RX_0] = {SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+	[SLIM_RX_1] = {SAMPLING_RATE_96KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
+#else
 	[SLIM_RX_1] = {SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
+#endif
 	[SLIM_RX_2] = {SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
 	[SLIM_RX_3] = {SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
 	[SLIM_RX_4] = {SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
@@ -344,7 +348,11 @@ static struct dev_config slim_rx_cfg[] = {
 
 static struct dev_config slim_tx_cfg[] = {
 	[SLIM_TX_0] = {SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+	[SLIM_TX_1] = {SAMPLING_RATE_96KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
+#else
 	[SLIM_TX_1] = {SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
+#endif
 	[SLIM_TX_2] = {SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
 	[SLIM_TX_3] = {SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
 	[SLIM_TX_4] = {SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
@@ -572,6 +580,12 @@ static const char *const mi2s_ch_text[] = {"One", "Two", "Three", "Four",
 					   "Eight"};
 static const char *const hifi_text[] = {"Off", "On"};
 
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+static const char *const ras_switch_text[] = {"None", "Speaker", "Receiver"};
+static const char *const vendor_id_text[] = {"None", "AAC", "Goer", "SSI", "Unknown"};
+static const char *const ultrasound_power_text[] = {"Off", "On"};
+#endif
+
 static SOC_ENUM_SINGLE_EXT_DECL(slim_0_rx_chs, slim_rx_ch_text);
 static SOC_ENUM_SINGLE_EXT_DECL(slim_2_rx_chs, slim_rx_ch_text);
 static SOC_ENUM_SINGLE_EXT_DECL(slim_0_tx_chs, slim_tx_ch_text);
@@ -638,6 +652,12 @@ static SOC_ENUM_SINGLE_EXT_DECL(mi2s_rx_format, bit_format_text);
 static SOC_ENUM_SINGLE_EXT_DECL(mi2s_tx_format, bit_format_text);
 static SOC_ENUM_SINGLE_EXT_DECL(hifi_function, hifi_text);
 
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+static SOC_ENUM_SINGLE_EXT_DECL(ras_switch, ras_switch_text);
+static SOC_ENUM_SINGLE_EXT_DECL(vendor_id, vendor_id_text);
+static SOC_ENUM_SINGLE_EXT_DECL(ultrasound_power, ultrasound_power_text);
+#endif
+
 static struct platform_device *spdev;
 static int msm_hifi_control;
 
@@ -646,6 +666,12 @@ static bool codec_reg_done;
 static struct snd_soc_aux_dev *msm_aux_dev;
 static struct snd_soc_codec_conf *msm_codec_conf;
 static struct msm_asoc_wcd93xx_codec msm_codec_fn;
+
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+static int ras_switch_en_gpio = -1;
+static int ras_switch_sel_gpio = -1;
+static int ultrasound_power_state;
+#endif
 
 static void *def_tasha_mbhc_cal(void);
 static void *def_tavil_mbhc_cal(void);
@@ -665,15 +691,25 @@ static struct wcd_mbhc_config wcd_mbhc_cfg = {
 	.swap_gnd_mic = NULL,
 	.hs_ext_micbias = true,
 	.key_code[0] = KEY_MEDIA,
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+	.key_code[1] = KEY_VOLUMEUP,
+	.key_code[2] = KEY_VOLUMEDOWN,
+	.key_code[3] = 0,
+#else
 	.key_code[1] = KEY_VOICECOMMAND,
 	.key_code[2] = KEY_VOLUMEUP,
 	.key_code[3] = KEY_VOLUMEDOWN,
+#endif
 	.key_code[4] = 0,
 	.key_code[5] = 0,
 	.key_code[6] = 0,
 	.key_code[7] = 0,
 	.linein_th = 5000,
-	.moisture_en = true,
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+	.moisture_en = false,
+#else
+	.moisture_en = true, 
+#endif
 	.mbhc_micbias = MIC_BIAS_2,
 	.anc_micbias = MIC_BIAS_2,
 	.enable_anc_mic_detect = false,
@@ -3144,6 +3180,186 @@ static int msm_hifi_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+static int ras_switch_get(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	int en = -1;
+	int sel = -1;
+
+	if (gpio_is_valid(ras_switch_en_gpio))
+		en = gpio_get_value(ras_switch_en_gpio);
+	if (gpio_is_valid(ras_switch_sel_gpio))
+		sel = gpio_get_value(ras_switch_sel_gpio);
+	pr_debug("%s: ras pin state, en(%d) = %d, sel(%d)=%d\n", __func__,
+		ras_switch_en_gpio, en, ras_switch_sel_gpio, sel);
+
+	if (en <= 0)
+		ucontrol->value.integer.value[0] = 0;
+	else if (sel <= 0)
+		ucontrol->value.integer.value[0] = 1;
+	else
+		ucontrol->value.integer.value[0] = 2;
+	return 0;
+}
+
+static int ras_switch_put(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	int value = ucontrol->value.integer.value[0];
+
+	pr_debug("%s: value = %d\n", __func__, value);
+
+	if (gpio_is_valid(ras_switch_en_gpio) &&
+	    gpio_is_valid(ras_switch_sel_gpio)) {
+		switch (value) {
+		case 0:
+			gpio_direction_output(ras_switch_en_gpio, 0);
+			gpio_direction_output(ras_switch_sel_gpio, 0);
+			break;
+		case 1:
+			gpio_direction_output(ras_switch_en_gpio, 1);
+			gpio_direction_output(ras_switch_sel_gpio, 0);
+			break;
+		case 2:
+			gpio_direction_output(ras_switch_en_gpio, 1);
+			gpio_direction_output(ras_switch_sel_gpio, 1);
+			break;
+		default:
+			break;
+	    }
+	}
+	return 0;
+}
+
+static int usbhs_direction_get(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct snd_soc_card *card = codec->component.card;
+	struct msm_asoc_mach_data *pdata =
+				snd_soc_card_get_drvdata(card);
+
+	ucontrol->value.integer.value[0] = 0;
+
+	codec = snd_soc_kcontrol_codec(kcontrol);
+	if (codec) {
+		card = codec->component.card;
+		if (card) {
+			pdata = snd_soc_card_get_drvdata(card);
+			if (!pdata)
+				return 0;
+		}
+	}
+
+	if (pdata->us_euro_gpio_p)
+		ucontrol->value.integer.value[0] = msm_cdc_pinctrl_get_state(pdata->us_euro_gpio_p);
+	else if (pdata->us_euro_gpio >= 0)
+		ucontrol->value.integer.value[0] = gpio_get_value_cansleep(pdata->us_euro_gpio);
+
+	return 0;
+}
+
+static int spk_id_get(struct device_node *np, int type)
+{
+	int id;
+	int state;
+
+	state = spk_id_get_pin_3state(np);
+	if (state < 0) {
+		pr_err("%s: Can not get id pin state, %d\n", __func__, state);
+		return VENDOR_ID_NONE;
+	}
+
+	switch (state) {
+	case PIN_PULL_DOWN:
+		if (type == 0)
+			id = VENDOR_ID_AAC;
+		else
+			id = VENDOR_ID_SSI;
+		break;
+	case PIN_PULL_UP:
+		id = VENDOR_ID_UNKNOWN;
+		break;
+	case PIN_FLOAT:
+		if (type == 0)
+			id = VENDOR_ID_SSI;
+		else
+			id = VENDOR_ID_AAC;
+		break;
+	default:
+		id = VENDOR_ID_UNKNOWN;
+		break;
+	}
+
+	return id;
+}
+
+static int vendor_id_get(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct snd_soc_card *card = codec->component.card;
+	struct msm_asoc_mach_data *pdata =
+				snd_soc_card_get_drvdata(card);
+
+	ucontrol->value.integer.value[0] = 0;
+
+	codec = snd_soc_kcontrol_codec(kcontrol);
+	if (codec) {
+		card = codec->component.card;
+		if (card) {
+			pdata = snd_soc_card_get_drvdata(card);
+			if (!pdata)
+				return 0;
+		}
+	}
+
+	if (!strncmp(kcontrol->id.name, "SPK ID", strlen("SPK ID"))) {
+		if (pdata->spk_id_gpio_p)
+			ucontrol->value.integer.value[0] = spk_id_get(pdata->spk_id_gpio_p, 0);
+	} else {
+		if (pdata->rcv_id_gpio_p)
+			ucontrol->value.integer.value[0] = spk_id_get(pdata->rcv_id_gpio_p, 1);
+	}
+
+	return 0;
+}
+
+static int ultrasound_power_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = ultrasound_power_state;
+	return 0;
+}
+
+static int ultrasound_power_put(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct snd_soc_card *card = codec->component.card;
+	struct msm_asoc_mach_data *pdata = snd_soc_card_get_drvdata(card);
+	int ret;
+
+	ultrasound_power_state = ucontrol->value.integer.value[0];
+	pr_debug("%s: ultrasound power %d\n", __func__, ultrasound_power_state);
+
+	if (ultrasound_power_state == 1) {
+		if (pdata->us_p_power)
+			ret = regulator_enable(pdata->us_p_power);
+		if (pdata->us_n_power)
+			ret = regulator_enable(pdata->us_n_power);
+	} else {
+		if (pdata->us_p_power)
+			ret = regulator_disable(pdata->us_p_power);
+		if (pdata->us_n_power)
+			ret = regulator_disable(pdata->us_n_power);
+	}
+
+	return 0;
+}
+#endif
+
 static const struct snd_kcontrol_new msm_snd_controls[] = {
 	SOC_ENUM_EXT("SLIM_0_RX Channels", slim_0_rx_chs,
 			msm_slim_rx_ch_get, msm_slim_rx_ch_put),
@@ -3222,43 +3438,16 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 	SOC_ENUM_EXT("PRI_TDM_TX_0 SampleRate", tdm_tx_sample_rate,
 			tdm_tx_sample_rate_get,
 			tdm_tx_sample_rate_put),
-	SOC_ENUM_EXT("PRI_TDM_TX_1 SampleRate", tdm_tx_sample_rate,
-			tdm_tx_sample_rate_get,
-			tdm_tx_sample_rate_put),
-	SOC_ENUM_EXT("PRI_TDM_TX_2 SampleRate", tdm_tx_sample_rate,
-			tdm_tx_sample_rate_get,
-			tdm_tx_sample_rate_put),
-	SOC_ENUM_EXT("PRI_TDM_TX_3 SampleRate", tdm_tx_sample_rate,
-			tdm_tx_sample_rate_get,
-			tdm_tx_sample_rate_put),
 	SOC_ENUM_EXT("PRI_TDM_RX_0 Format", tdm_rx_format,
 			tdm_rx_format_get,
 			tdm_rx_format_put),
 	SOC_ENUM_EXT("PRI_TDM_TX_0 Format", tdm_tx_format,
 			tdm_tx_format_get,
 			tdm_tx_format_put),
-	SOC_ENUM_EXT("PRI_TDM_TX_1 Format", tdm_tx_format,
-			tdm_tx_format_get,
-			tdm_tx_format_put),
-	SOC_ENUM_EXT("PRI_TDM_TX_2 Format", tdm_tx_format,
-			tdm_tx_format_get,
-			tdm_tx_format_put),
-	SOC_ENUM_EXT("PRI_TDM_TX_3 Format", tdm_tx_format,
-			tdm_tx_format_get,
-			tdm_tx_format_put),
 	SOC_ENUM_EXT("PRI_TDM_RX_0 Channels", tdm_rx_chs,
 			tdm_rx_ch_get,
 			tdm_rx_ch_put),
 	SOC_ENUM_EXT("PRI_TDM_TX_0 Channels", tdm_tx_chs,
-			tdm_tx_ch_get,
-			tdm_tx_ch_put),
-	SOC_ENUM_EXT("PRI_TDM_TX_1 Channels", tdm_tx_chs,
-			tdm_tx_ch_get,
-			tdm_tx_ch_put),
-	SOC_ENUM_EXT("PRI_TDM_TX_2 Channels", tdm_tx_chs,
-			tdm_tx_ch_get,
-			tdm_tx_ch_put),
-	SOC_ENUM_EXT("PRI_TDM_TX_3 Channels", tdm_tx_chs,
 			tdm_tx_ch_get,
 			tdm_tx_ch_put),
 	SOC_ENUM_EXT("SEC_TDM_RX_0 SampleRate", tdm_rx_sample_rate,
@@ -3303,43 +3492,16 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 	SOC_ENUM_EXT("QUAT_TDM_TX_0 SampleRate", tdm_tx_sample_rate,
 			tdm_tx_sample_rate_get,
 			tdm_tx_sample_rate_put),
-	SOC_ENUM_EXT("QUAT_TDM_TX_1 SampleRate", tdm_tx_sample_rate,
-			tdm_tx_sample_rate_get,
-			tdm_tx_sample_rate_put),
-	SOC_ENUM_EXT("QUAT_TDM_TX_2 SampleRate", tdm_tx_sample_rate,
-			tdm_tx_sample_rate_get,
-			tdm_tx_sample_rate_put),
-	SOC_ENUM_EXT("QUAT_TDM_TX_3 SampleRate", tdm_tx_sample_rate,
-			tdm_tx_sample_rate_get,
-			tdm_tx_sample_rate_put),
 	SOC_ENUM_EXT("QUAT_TDM_RX_0 Format", tdm_rx_format,
 			tdm_rx_format_get,
 			tdm_rx_format_put),
 	SOC_ENUM_EXT("QUAT_TDM_TX_0 Format", tdm_tx_format,
 			tdm_tx_format_get,
 			tdm_tx_format_put),
-	SOC_ENUM_EXT("QUAT_TDM_TX_1 Format", tdm_tx_format,
-			tdm_tx_format_get,
-			tdm_tx_format_put),
-	SOC_ENUM_EXT("QUAT_TDM_TX_2 Format", tdm_tx_format,
-			tdm_tx_format_get,
-			tdm_tx_format_put),
-	SOC_ENUM_EXT("QUAT_TDM_TX_3 Format", tdm_tx_format,
-			tdm_tx_format_get,
-			tdm_tx_format_put),
 	SOC_ENUM_EXT("QUAT_TDM_RX_0 Channels", tdm_rx_chs,
 			tdm_rx_ch_get,
 			tdm_rx_ch_put),
 	SOC_ENUM_EXT("QUAT_TDM_TX_0 Channels", tdm_tx_chs,
-			tdm_tx_ch_get,
-			tdm_tx_ch_put),
-	SOC_ENUM_EXT("QUAT_TDM_TX_1 Channels", tdm_tx_chs,
-			tdm_tx_ch_get,
-			tdm_tx_ch_put),
-	SOC_ENUM_EXT("QUAT_TDM_TX_2 Channels", tdm_tx_chs,
-			tdm_tx_ch_get,
-			tdm_tx_ch_put),
-	SOC_ENUM_EXT("QUAT_TDM_TX_3 Channels", tdm_tx_chs,
 			tdm_tx_ch_get,
 			tdm_tx_ch_put),
 	SOC_ENUM_EXT("PRI_TDM SlotNumber", tdm_slot_num,
@@ -3632,6 +3794,16 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 			msm_mi2s_tx_format_get, msm_mi2s_tx_format_put),
 	SOC_ENUM_EXT("HiFi Function", hifi_function, msm_hifi_get,
 			msm_hifi_put),
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+	SOC_ENUM_EXT("RAS Switch", ras_switch,
+			ras_switch_get, ras_switch_put),
+	SOC_SINGLE_EXT("USB Headset Direction", 0, 0, UINT_MAX, 0,
+			usbhs_direction_get, NULL),
+	SOC_ENUM_EXT("RCV ID", vendor_id, vendor_id_get, NULL),
+	SOC_ENUM_EXT("SPK ID", vendor_id, vendor_id_get, NULL),
+	SOC_ENUM_EXT("Ultrasound Power", ultrasound_power,
+			ultrasound_power_get, ultrasound_power_put),
+#endif
 };
 
 static int msm_snd_enable_codec_ext_clk(struct snd_soc_codec *codec,
@@ -4578,7 +4750,11 @@ static void *def_tasha_mbhc_cal(void)
 		return NULL;
 
 #define S(X, Y) ((WCD_MBHC_CAL_PLUG_TYPE_PTR(tasha_wcd_cal)->X) = (Y))
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+	S(v_hs_max, 1700);
+#else
 	S(v_hs_max, 1600);
+#endif
 #undef S
 #define S(X, Y) ((WCD_MBHC_CAL_BTN_DET_PTR(tasha_wcd_cal)->X) = (Y))
 	S(num_btn, WCD_MBHC_DEF_BUTTONS);
@@ -4589,6 +4765,15 @@ static void *def_tasha_mbhc_cal(void)
 		(sizeof(btn_cfg->_v_btn_low[0]) * btn_cfg->num_btn);
 
 	btn_high[0] = 75;
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+	btn_high[1] = 260;
+	btn_high[2] = 750;
+	btn_high[3] = 750;
+	btn_high[4] = 750;
+	btn_high[5] = 750;
+	btn_high[6] = 750;
+	btn_high[7] = 750;
+#else
 	btn_high[1] = 150;
 	btn_high[2] = 237;
 	btn_high[3] = 500;
@@ -4596,6 +4781,7 @@ static void *def_tasha_mbhc_cal(void)
 	btn_high[5] = 500;
 	btn_high[6] = 500;
 	btn_high[7] = 500;
+#endif
 
 	return tasha_wcd_cal;
 }
@@ -5729,84 +5915,19 @@ static int msm_tdm_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	return 0;
 }
 
-static unsigned int msm8998_tdm_param_set_slot_mask(u16 port_id, int slot_width,
-		int slots, int tdm_interface)
+static unsigned int tdm_param_set_slot_mask(int slots)
 {
 	unsigned int slot_mask = 0;
-	int upper, lower, i, j, rx_path = 0;
-	unsigned int *slot_offset;
+	int i = 0;
 
-	switch (port_id) {
-	case AFE_PORT_ID_PRIMARY_TDM_RX:
-	case AFE_PORT_ID_PRIMARY_TDM_RX_1:
-	case AFE_PORT_ID_PRIMARY_TDM_RX_2:
-	case AFE_PORT_ID_PRIMARY_TDM_RX_3:
-	case AFE_PORT_ID_PRIMARY_TDM_RX_4:
-	case AFE_PORT_ID_PRIMARY_TDM_RX_5:
-	case AFE_PORT_ID_PRIMARY_TDM_RX_6:
-	case AFE_PORT_ID_PRIMARY_TDM_RX_7:
-		lower = PRIMARY_TDM_RX_0;
-		upper = PRIMARY_TDM_RX_7;
-		rx_path = 1;
-		break;
-	case AFE_PORT_ID_QUATERNARY_TDM_RX:
-	case AFE_PORT_ID_QUATERNARY_TDM_RX_1:
-	case AFE_PORT_ID_QUATERNARY_TDM_RX_2:
-	case AFE_PORT_ID_QUATERNARY_TDM_RX_3:
-	case AFE_PORT_ID_QUATERNARY_TDM_RX_4:
-	case AFE_PORT_ID_QUATERNARY_TDM_RX_5:
-	case AFE_PORT_ID_QUATERNARY_TDM_RX_6:
-	case AFE_PORT_ID_QUATERNARY_TDM_RX_7:
-		lower = PRIMARY_TDM_RX_0;
-		upper = PRIMARY_TDM_RX_7;
-		rx_path = 1;
-		break;
-
-	case AFE_PORT_ID_PRIMARY_TDM_TX:
-	case AFE_PORT_ID_PRIMARY_TDM_TX_1:
-	case AFE_PORT_ID_PRIMARY_TDM_TX_2:
-	case AFE_PORT_ID_PRIMARY_TDM_TX_3:
-	case AFE_PORT_ID_PRIMARY_TDM_TX_4:
-	case AFE_PORT_ID_PRIMARY_TDM_TX_5:
-	case AFE_PORT_ID_PRIMARY_TDM_TX_6:
-	case AFE_PORT_ID_PRIMARY_TDM_TX_7:
-		lower = PRIMARY_TDM_TX_0;
-		upper = PRIMARY_TDM_TX_7;
-		break;
-	case AFE_PORT_ID_QUATERNARY_TDM_TX:
-	case AFE_PORT_ID_QUATERNARY_TDM_TX_1:
-	case AFE_PORT_ID_QUATERNARY_TDM_TX_2:
-	case AFE_PORT_ID_QUATERNARY_TDM_TX_3:
-	case AFE_PORT_ID_QUATERNARY_TDM_TX_4:
-	case AFE_PORT_ID_QUATERNARY_TDM_TX_5:
-	case AFE_PORT_ID_QUATERNARY_TDM_TX_6:
-	case AFE_PORT_ID_QUATERNARY_TDM_TX_7:
-		lower = PRIMARY_TDM_TX_0;
-		upper = PRIMARY_TDM_TX_7;
-		break;
-	default:
-		return slot_mask;
+	if ((slots <= 0) || (slots > 32)) {
+		pr_err("%s: invalid slot number %d\n", __func__, slots);
+		return -EINVAL;
 	}
 
-	for (i = lower; i <= upper; i++) {
-		if (rx_path)
-			slot_offset = tdm_rx_slot_offset[tdm_interface][i];
-		else
-			slot_offset = tdm_tx_slot_offset[tdm_interface][i];
+	for (i = 0; i < slots ; i++)
+		slot_mask |= 1 << i;
 
-		for (j = 0; j < TDM_SLOT_OFFSET_MAX; j++) {
-			if (slot_offset[j] != AFE_SLOT_MAPPING_OFFSET_INVALID) {
-				/*
-				 * set the mask of active slot according to
-				 * the offset table for the group of devices
-				 */
-				slot_mask |=
-				(1 << ((slot_offset[j] * 8) / slot_width));
-			} else {
-				break;
-			}
-		}
-	}
 	return slot_mask;
 }
 
@@ -5816,7 +5937,7 @@ static int msm8998_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	int ret = 0;
-	int channels, slot_width, slots, rate, format, tdm_interface;
+	int channels, slot_width, slots, rate, format;
 	unsigned int slot_mask;
 	unsigned int *slot_offset;
 	int offset_channels = 0;
@@ -5851,385 +5972,321 @@ static int msm8998_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_rx_slot_offset[TDM_PRI][TDM_0];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_RX_1:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_rx_slot_offset[TDM_PRI][TDM_1];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_RX_2:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_rx_slot_offset[TDM_PRI][TDM_2];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_RX_3:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_rx_slot_offset[TDM_PRI][TDM_3];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_RX_4:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_rx_slot_offset[TDM_PRI][TDM_4];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_RX_5:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_rx_slot_offset[TDM_PRI][TDM_5];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_RX_6:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_rx_slot_offset[TDM_PRI][TDM_6];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_RX_7:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_rx_slot_offset[TDM_PRI][TDM_7];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_TX:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_tx_slot_offset[TDM_PRI][TDM_0];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_TX_1:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_tx_slot_offset[TDM_PRI][TDM_1];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_TX_2:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_tx_slot_offset[TDM_PRI][TDM_2];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_TX_3:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_tx_slot_offset[TDM_PRI][TDM_3];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_TX_4:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_tx_slot_offset[TDM_PRI][TDM_4];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_TX_5:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_tx_slot_offset[TDM_PRI][TDM_5];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_TX_6:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_tx_slot_offset[TDM_PRI][TDM_6];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_PRIMARY_TDM_TX_7:
 		slots = tdm_slot[TDM_PRI].num;
 		slot_width = tdm_slot[TDM_PRI].width;
 		slot_offset = tdm_tx_slot_offset[TDM_PRI][TDM_7];
-		tdm_interface = TDM_PRI;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_RX:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_rx_slot_offset[TDM_SEC][TDM_0];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_RX_1:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_rx_slot_offset[TDM_SEC][TDM_1];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_RX_2:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_rx_slot_offset[TDM_SEC][TDM_2];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_RX_3:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_rx_slot_offset[TDM_SEC][TDM_3];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_RX_4:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_rx_slot_offset[TDM_SEC][TDM_4];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_RX_5:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_rx_slot_offset[TDM_SEC][TDM_5];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_RX_6:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_rx_slot_offset[TDM_SEC][TDM_6];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_RX_7:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_rx_slot_offset[TDM_SEC][TDM_7];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_TX:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_tx_slot_offset[TDM_SEC][TDM_0];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_TX_1:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_tx_slot_offset[TDM_SEC][TDM_1];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_TX_2:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_tx_slot_offset[TDM_SEC][TDM_2];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_TX_3:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_tx_slot_offset[TDM_SEC][TDM_3];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_TX_4:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_tx_slot_offset[TDM_SEC][TDM_4];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_TX_5:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_tx_slot_offset[TDM_SEC][TDM_5];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_TX_6:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_tx_slot_offset[TDM_SEC][TDM_6];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_SECONDARY_TDM_TX_7:
 		slots = tdm_slot[TDM_SEC].num;
 		slot_width = tdm_slot[TDM_SEC].width;
 		slot_offset = tdm_tx_slot_offset[TDM_SEC][TDM_7];
-		tdm_interface = TDM_SEC;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_RX:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_TERT][TDM_0];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_RX_1:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_TERT][TDM_1];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_RX_2:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_TERT][TDM_2];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_RX_3:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_TERT][TDM_3];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_RX_4:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_TERT][TDM_4];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_RX_5:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_TERT][TDM_5];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_RX_6:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_TERT][TDM_6];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_RX_7:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_TERT][TDM_7];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_TX:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_TERT][TDM_0];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_TX_1:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_TERT][TDM_1];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_TX_2:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_TERT][TDM_2];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_TX_3:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_TERT][TDM_3];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_TX_4:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_TERT][TDM_4];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_TX_5:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_TERT][TDM_5];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_TX_6:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_TERT][TDM_6];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_TERTIARY_TDM_TX_7:
 		slots = tdm_slot[TDM_TERT].num;
 		slot_width = tdm_slot[TDM_TERT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_TERT][TDM_7];
-		tdm_interface = TDM_TERT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_RX:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_QUAT][TDM_0];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_RX_1:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_QUAT][TDM_1];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_RX_2:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_QUAT][TDM_2];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_RX_3:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_QUAT][TDM_3];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_RX_4:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_QUAT][TDM_4];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_RX_5:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_QUAT][TDM_5];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_RX_6:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_QUAT][TDM_6];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_RX_7:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_rx_slot_offset[TDM_QUAT][TDM_7];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_TX:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_QUAT][TDM_0];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_TX_1:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_QUAT][TDM_1];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_TX_2:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_QUAT][TDM_2];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_TX_3:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_QUAT][TDM_3];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_TX_4:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_QUAT][TDM_4];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_TX_5:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_QUAT][TDM_5];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_TX_6:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_QUAT][TDM_6];
-		tdm_interface = TDM_QUAT;
 		break;
 	case AFE_PORT_ID_QUATERNARY_TDM_TX_7:
 		slots = tdm_slot[TDM_QUAT].num;
 		slot_width = tdm_slot[TDM_QUAT].width;
 		slot_offset = tdm_tx_slot_offset[TDM_QUAT][TDM_7];
-		tdm_interface = TDM_QUAT;
 		break;
 	default:
 		pr_err("%s: dai id 0x%x not supported\n",
@@ -6256,19 +6313,7 @@ static int msm8998_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
-	slot_mask = msm8998_tdm_param_set_slot_mask(cpu_dai->id,
-				slot_width, slots, tdm_interface);
-	pr_debug("%s: slot_mask :%x\n", __func__, slot_mask);
-
-	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
-		/* over write slot-mask if configured for full slots */
-		if ((slots == 32) && (slot_width == 16))
-			slot_mask = 0xffffffff;
-		else if ((slots == 16) && (slot_width == 32))
-			slot_mask = 0xffff;
-		pr_debug("%s:slot_mask :%x slots %d slot_width %d\n", __func__,
-					slot_mask, slots, slot_width);
-	}
+	slot_mask = tdm_param_set_slot_mask(slots);
 	if (!slot_mask) {
 		pr_err("%s: invalid slot_mask 0x%x\n",
 			__func__, slot_mask);
@@ -6489,6 +6534,133 @@ static struct snd_soc_ops msm_aux_pcm_be_ops = {
 	.shutdown = msm_aux_pcm_snd_shutdown,
 };
 
+static int msm_tdm_snd_hw_params(struct snd_pcm_substream *substream,
+				     struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	int ret = 0;
+	int channels, slot_width, slots;
+	unsigned int slot_mask;
+	unsigned int *slot_offset;
+	int offset_channels = 0;
+	int i;
+
+	pr_debug("%s: dai id = 0x%x\n", __func__, cpu_dai->id);
+
+	channels = params_channels(params);
+	switch (channels) {
+	case 1:
+	case 2:
+	case 3:
+	case 4:
+	case 5:
+	case 6:
+	case 7:
+	case 8:
+		switch (params_format(params)) {
+		case SNDRV_PCM_FORMAT_S32_LE:
+		case SNDRV_PCM_FORMAT_S24_LE:
+		case SNDRV_PCM_FORMAT_S16_LE:
+		/*
+		 * up to 8 channels HW config should
+		 * use 32 bit slot width for max support of
+		 * stream bit width. (slot_width > bit_width)
+		 */
+			slot_width = 32;
+			break;
+		default:
+			pr_err("%s: invalid param format 0x%x\n",
+				__func__, params_format(params));
+			return -EINVAL;
+		}
+		slots = 8;
+		slot_mask = tdm_param_set_slot_mask(slots);
+		if (!slot_mask) {
+			pr_err("%s: invalid slot_mask 0x%x\n",
+				__func__, slot_mask);
+			return -EINVAL;
+		}
+		break;
+	default:
+		pr_err("%s: invalid param channels %d\n",
+			__func__, channels);
+		return -EINVAL;
+	}
+	/* currently only supporting TDM_RX_0 and TDM_TX_0 */
+	switch (cpu_dai->id) {
+	case AFE_PORT_ID_PRIMARY_TDM_RX:
+	case AFE_PORT_ID_SECONDARY_TDM_RX:
+	case AFE_PORT_ID_TERTIARY_TDM_RX:
+	case AFE_PORT_ID_QUATERNARY_TDM_RX:
+	case AFE_PORT_ID_PRIMARY_TDM_TX:
+	case AFE_PORT_ID_SECONDARY_TDM_TX:
+	case AFE_PORT_ID_TERTIARY_TDM_TX:
+	case AFE_PORT_ID_QUATERNARY_TDM_TX:
+		slot_offset = tdm_slot_offset[TDM_0];
+		break;
+	default:
+		pr_err("%s: dai id 0x%x not supported\n",
+			__func__, cpu_dai->id);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < TDM_SLOT_OFFSET_MAX; i++) {
+		if (slot_offset[i] != AFE_SLOT_MAPPING_OFFSET_INVALID)
+			offset_channels++;
+		else
+			break;
+	}
+
+	if (offset_channels == 0) {
+		pr_err("%s: slot offset not supported, offset_channels %d\n",
+			__func__, offset_channels);
+		return -EINVAL;
+	}
+
+	if (channels > offset_channels) {
+		pr_err("%s: channels %d exceed offset_channels %d\n",
+			__func__, channels, offset_channels);
+		return -EINVAL;
+	}
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		ret = snd_soc_dai_set_tdm_slot(cpu_dai, 0, slot_mask,
+					       slots, slot_width);
+		if (ret < 0) {
+			pr_err("%s: failed to set tdm slot, err:%d\n",
+				__func__, ret);
+			goto end;
+		}
+
+		ret = snd_soc_dai_set_channel_map(cpu_dai, 0, NULL,
+						  channels, slot_offset);
+		if (ret < 0) {
+			pr_err("%s: failed to set channel map, err:%d\n",
+				__func__, ret);
+			goto end;
+		}
+	} else {
+		ret = snd_soc_dai_set_tdm_slot(cpu_dai, slot_mask, 0,
+					       slots, slot_width);
+		if (ret < 0) {
+			pr_err("%s: failed to set tdm slot, err:%d\n",
+				__func__, ret);
+			goto end;
+		}
+
+		ret = snd_soc_dai_set_channel_map(cpu_dai, channels,
+						  slot_offset, 0, NULL);
+		if (ret < 0) {
+			pr_err("%s: failed to set channel map, err:%d\n",
+				__func__, ret);
+			goto end;
+		}
+	}
+end:
+	return ret;
+}
+
 static struct snd_soc_ops msm_be_ops = {
 	.hw_params = msm_snd_hw_params,
 };
@@ -6503,6 +6675,10 @@ static struct snd_soc_ops msm_slimbus_2_be_ops = {
 
 static struct snd_soc_ops msm_wcn_ops = {
 	.hw_params = msm_wcn_hw_params,
+};
+
+static struct snd_soc_ops msm_tdm_be_ops = {
+	.hw_params = msm_tdm_snd_hw_params
 };
 
 /* Digital audio interface glue - connects codec <---> CPU */
@@ -7358,78 +7534,6 @@ static struct snd_soc_dai_link msm_common_misc_fe_dai_links[] = {
 	},
 };
 
-static struct snd_soc_dai_link msm_ext_common_fe_dai[] = {
-	/* Extra FrontEnd DAI Links after compress fe*/
-	{/* hw:x,66 */
-		.name = MSM_DAILINK_NAME(Media30),
-		.stream_name = "MultiMedia30",
-		.cpu_dai_name = "MultiMedia30",
-		.platform_name  = "msm-pcm-dsp.0",
-		.dynamic = 1,
-		.dpcm_capture = 1,
-		.dpcm_playback = 1,
-		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
-			 SND_SOC_DPCM_TRIGGER_POST},
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.ignore_suspend = 1,
-		.ignore_pmdown_time = 1,
-		 /* this dai link has playback support */
-		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA30,
-	},
-	{/* hw:x,67 */
-		.name = MSM_DAILINK_NAME(Media31),
-		.stream_name = "MultiMedia31",
-		.cpu_dai_name = "MultiMedia31",
-		.platform_name  = "msm-pcm-dsp.0",
-		.dynamic = 1,
-		.dpcm_capture = 1,
-		.dpcm_playback = 1,
-		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
-			 SND_SOC_DPCM_TRIGGER_POST},
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.ignore_suspend = 1,
-		.ignore_pmdown_time = 1,
-		 /* this dai link has playback support */
-		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA31,
-	},
-	{/* hw:x,68 */
-		.name = MSM_DAILINK_NAME(Media32),
-		.stream_name = "MultiMedia32",
-		.cpu_dai_name = "MultiMedia32",
-		.platform_name  = "msm-pcm-dsp.0",
-		.dynamic = 1,
-		.dpcm_capture = 1,
-		.dpcm_playback = 1,
-		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
-			 SND_SOC_DPCM_TRIGGER_POST},
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.ignore_suspend = 1,
-		.ignore_pmdown_time = 1,
-		 /* this dai link has playback support */
-		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA32,
-	},
-	{/* hw:x,69 */
-		.name = MSM_DAILINK_NAME(Media33),
-		.stream_name = "MultiMedia33",
-		.cpu_dai_name = "MultiMedia33",
-		.platform_name  = "msm-pcm-dsp.0",
-		.dynamic = 1,
-		.dpcm_capture = 1,
-		.dpcm_playback = 1,
-		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
-			 SND_SOC_DPCM_TRIGGER_POST},
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.ignore_suspend = 1,
-		.ignore_pmdown_time = 1,
-		 /* this dai link has playback support */
-		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA33,
-	},
-};
-
 static struct snd_soc_dai_link msm_common_be_dai_links[] = {
 	/* Backend AFE DAI Links */
 	{
@@ -7582,7 +7686,7 @@ static struct snd_soc_dai_link msm_common_be_dai_links[] = {
 		.dpcm_playback = 1,
 		.be_id = MSM_BACKEND_DAI_SEC_TDM_RX_0,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
-		.ops = &msm8998_tdm_be_ops,
+		.ops = &msm_tdm_be_ops,
 		.ignore_suspend = 1,
 	},
 	{
@@ -7596,7 +7700,7 @@ static struct snd_soc_dai_link msm_common_be_dai_links[] = {
 		.dpcm_capture = 1,
 		.be_id = MSM_BACKEND_DAI_SEC_TDM_TX_0,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
-		.ops = &msm8998_tdm_be_ops,
+		.ops = &msm_tdm_be_ops,
 		.ignore_suspend = 1,
 	},
 	{
@@ -7610,7 +7714,7 @@ static struct snd_soc_dai_link msm_common_be_dai_links[] = {
 		.dpcm_playback = 1,
 		.be_id = MSM_BACKEND_DAI_TERT_TDM_RX_0,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
-		.ops = &msm8998_tdm_be_ops,
+		.ops = &msm_tdm_be_ops,
 		.ignore_suspend = 1,
 	},
 	{
@@ -7624,7 +7728,7 @@ static struct snd_soc_dai_link msm_common_be_dai_links[] = {
 		.dpcm_capture = 1,
 		.be_id = MSM_BACKEND_DAI_TERT_TDM_TX_0,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
-		.ops = &msm8998_tdm_be_ops,
+		.ops = &msm_tdm_be_ops,
 		.ignore_suspend = 1,
 	},
 	{
@@ -7695,7 +7799,11 @@ static struct snd_soc_dai_link msm_tasha_be_dai_links[] = {
 		.cpu_dai_name = "msm-dai-q6-dev.16386",
 		.platform_name = "msm-pcm-routing",
 		.codec_name = "tasha_codec",
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+		.codec_dai_name = "tasha_rx2",
+#else
 		.codec_dai_name = "tasha_mix_rx1",
+#endif
 		.no_pcm = 1,
 		.dpcm_playback = 1,
 		.be_id = MSM_BACKEND_DAI_SLIMBUS_1_RX,
@@ -7711,7 +7819,11 @@ static struct snd_soc_dai_link msm_tasha_be_dai_links[] = {
 		.cpu_dai_name = "msm-dai-q6-dev.16387",
 		.platform_name = "msm-pcm-routing",
 		.codec_name = "tasha_codec",
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+		.codec_dai_name = "tasha_tx2",
+#else
 		.codec_dai_name = "tasha_tx3",
+#endif
 		.no_pcm = 1,
 		.dpcm_capture = 1,
 		.be_id = MSM_BACKEND_DAI_SLIMBUS_1_TX,
@@ -8191,6 +8303,11 @@ static struct snd_soc_dai_link msm_mi2s_be_dai_links[] = {
 		.ops = &msm_mi2s_be_ops,
 		.ignore_suspend = 1,
 	},
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+};
+
+static struct snd_soc_dai_link msm_quat_mi2s_stub_dai_links[] = {
+#endif
 	{
 		.name = LPASS_BE_QUAT_MI2S_RX,
 		.stream_name = "Quaternary MI2S Playback",
@@ -8221,6 +8338,74 @@ static struct snd_soc_dai_link msm_mi2s_be_dai_links[] = {
 		.ignore_suspend = 1,
 	},
 };
+
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+static struct snd_soc_dai_link msm_quat_mi2s_tfa98xx_dai_links[] = {
+	{
+		.name = LPASS_BE_QUAT_MI2S_RX,
+		.stream_name = "Quaternary MI2S Playback",
+		.cpu_dai_name = "msm-dai-q6-mi2s.3",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "tfa98xx.10-0034",
+		.codec_dai_name = "tfa98xx-aif-a-34",
+		.no_pcm = 1,
+		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBS_CFS,
+		.dpcm_playback = 1,
+		.be_id = MSM_BACKEND_DAI_QUATERNARY_MI2S_RX,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_mi2s_be_ops,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+	},
+	{
+		.name = LPASS_BE_QUAT_MI2S_TX,
+		.stream_name = "Quaternary MI2S Capture",
+		.cpu_dai_name = "msm-dai-q6-mi2s.3",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "msm-stub-codec.1",
+		.codec_dai_name = "msm-stub-tx",
+		.no_pcm = 1,
+		.dpcm_capture = 1,
+		.be_id = MSM_BACKEND_DAI_QUATERNARY_MI2S_TX,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_mi2s_be_ops,
+		.ignore_suspend = 1,
+	},
+};
+
+static struct snd_soc_dai_link msm_quat_mi2s_tas2559_dai_links[] = {
+	{
+		.name = LPASS_BE_QUAT_MI2S_RX,
+		.stream_name = "Quaternary MI2S Playback",
+		.cpu_dai_name = "msm-dai-q6-mi2s.3",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "tas2559.10-004c",
+		.codec_dai_name = "tas2559 ASI1",
+		.no_pcm = 1,
+		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBS_CFS,
+		.dpcm_playback = 1,
+		.be_id = MSM_BACKEND_DAI_QUATERNARY_MI2S_RX,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_mi2s_be_ops,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+	},
+	{
+		.name = LPASS_BE_QUAT_MI2S_TX,
+		.stream_name = "Quaternary MI2S Capture",
+		.cpu_dai_name = "msm-dai-q6-mi2s.3",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "msm-stub-codec.1",
+		.codec_dai_name = "msm-stub-tx",
+		.no_pcm = 1,
+		.dpcm_capture = 1,
+		.be_id = MSM_BACKEND_DAI_QUATERNARY_MI2S_TX,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_mi2s_be_ops,
+		.ignore_suspend = 1,
+	},
+};
+#endif
 
 static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 	/* Primary AUX PCM Backend DAI Links */
@@ -8349,93 +8534,6 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 	},
 };
 
-static struct snd_soc_dai_link msm_ext_tdm_tx_group_be_dai[] = {
-	{
-		.name = LPASS_BE_PRI_TDM_TX_1,
-		.stream_name = "Primary TDM1 Capture",
-		.cpu_dai_name = "msm-dai-q6-tdm.36867",
-		.platform_name = "msm-pcm-routing",
-		.codec_name = "msm-stub-codec.1",
-		.codec_dai_name = "msm-stub-tx",
-		.no_pcm = 1,
-		.dpcm_capture = 1,
-		.be_id = MSM_BACKEND_DAI_PRI_TDM_TX_1,
-		.be_hw_params_fixup = msm_tdm_be_hw_params_fixup,
-		.ops = &msm8998_tdm_be_ops,
-		.ignore_suspend = 1,
-	},
-	{
-		.name = LPASS_BE_PRI_TDM_TX_2,
-		.stream_name = "Primary TDM2 Capture",
-		.cpu_dai_name = "msm-dai-q6-tdm.36869",
-		.platform_name = "msm-pcm-routing",
-		.codec_name = "msm-stub-codec.1",
-		.codec_dai_name = "msm-stub-tx",
-		.no_pcm = 1,
-		.dpcm_capture = 1,
-		.be_id = MSM_BACKEND_DAI_PRI_TDM_TX_2,
-		.be_hw_params_fixup = msm_tdm_be_hw_params_fixup,
-		.ops = &msm8998_tdm_be_ops,
-		.ignore_suspend = 1,
-	},
-	{
-		.name = LPASS_BE_PRI_TDM_TX_3,
-		.stream_name = "Primary TDM3 Capture",
-		.cpu_dai_name = "msm-dai-q6-tdm.36871",
-		.platform_name = "msm-pcm-routing",
-		.codec_name = "msm-stub-codec.1",
-		.codec_dai_name = "msm-stub-tx",
-		.no_pcm = 1,
-		.dpcm_capture = 1,
-		.be_id = MSM_BACKEND_DAI_PRI_TDM_TX_3,
-		.be_hw_params_fixup = msm_tdm_be_hw_params_fixup,
-		.ops = &msm8998_tdm_be_ops,
-		.ignore_suspend = 1,
-	},
-	{
-		.name = LPASS_BE_QUAT_TDM_TX_1,
-		.stream_name = "Quaternary TDM1 Capture",
-		.cpu_dai_name = "msm-dai-q6-tdm.36915",
-		.platform_name = "msm-pcm-routing",
-		.codec_name = "msm-stub-codec.1",
-		.codec_dai_name = "msm-stub-tx",
-		.no_pcm = 1,
-		.dpcm_capture = 1,
-		.be_id = MSM_BACKEND_DAI_QUAT_TDM_TX_1,
-		.be_hw_params_fixup = msm_tdm_be_hw_params_fixup,
-		.ops = &msm8998_tdm_be_ops,
-		.ignore_suspend = 1,
-	},
-	{
-		.name = LPASS_BE_QUAT_TDM_TX_2,
-		.stream_name = "Quaternary TDM2 Capture",
-		.cpu_dai_name = "msm-dai-q6-tdm.36917",
-		.platform_name = "msm-pcm-routing",
-		.codec_name = "msm-stub-codec.1",
-		.codec_dai_name = "msm-stub-tx",
-		.no_pcm = 1,
-		.dpcm_capture = 1,
-		.be_id = MSM_BACKEND_DAI_QUAT_TDM_TX_2,
-		.be_hw_params_fixup = msm_tdm_be_hw_params_fixup,
-		.ops = &msm8998_tdm_be_ops,
-		.ignore_suspend = 1,
-	},
-	{
-		.name = LPASS_BE_QUAT_TDM_TX_3,
-		.stream_name = "Quaternary TDM3 Capture",
-		.cpu_dai_name = "msm-dai-q6-tdm.36919",
-		.platform_name = "msm-pcm-routing",
-		.codec_name = "msm-stub-codec.1",
-		.codec_dai_name = "msm-stub-tx",
-		.no_pcm = 1,
-		.dpcm_capture = 1,
-		.be_id = MSM_BACKEND_DAI_QUAT_TDM_TX_3,
-		.be_hw_params_fixup = msm_tdm_be_hw_params_fixup,
-		.ops = &msm8998_tdm_be_ops,
-		.ignore_suspend = 1,
-	},
-};
-
 static struct snd_soc_dai_link msm_tasha_dai_links[
 			 ARRAY_SIZE(msm_common_dai_links) +
 			 ARRAY_SIZE(msm_tasha_fe_dai_links) +
@@ -8445,9 +8543,11 @@ static struct snd_soc_dai_link msm_tasha_dai_links[
 			 ARRAY_SIZE(msm_wcn_be_dai_links) +
 			 ARRAY_SIZE(ext_disp_be_dai_link) +
 			 ARRAY_SIZE(msm_mi2s_be_dai_links) +
-			 ARRAY_SIZE(msm_auxpcm_be_dai_links) +
-			 ARRAY_SIZE(msm_ext_tdm_tx_group_be_dai) +
-			 ARRAY_SIZE(msm_ext_common_fe_dai)];
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+			 ARRAY_SIZE(msm_mi2s_be_dai_links) +
+			 ARRAY_SIZE(msm_quat_mi2s_stub_dai_links) +
+#endif
+			 ARRAY_SIZE(msm_auxpcm_be_dai_links)];
 
 static struct snd_soc_dai_link msm_tavil_dai_links[
 			 ARRAY_SIZE(msm_common_dai_links) +
@@ -8458,6 +8558,10 @@ static struct snd_soc_dai_link msm_tavil_dai_links[
 			 ARRAY_SIZE(msm_wcn_be_dai_links) +
 			 ARRAY_SIZE(ext_disp_be_dai_link) +
 			 ARRAY_SIZE(msm_mi2s_be_dai_links) +
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+			 ARRAY_SIZE(msm_mi2s_be_dai_links) +
+			 ARRAY_SIZE(msm_quat_mi2s_stub_dai_links) +
+#endif
 			 ARRAY_SIZE(msm_auxpcm_be_dai_links)];
 
 static int msm_snd_card_late_probe(struct snd_soc_card *card)
@@ -8650,6 +8754,41 @@ static int msm_prepare_us_euro(struct snd_soc_card *card)
 	return ret;
 }
 
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+static int msm_prepare_ras_switch(struct snd_soc_card *card)
+{
+	int ret = 0;
+
+	if (gpio_is_valid(ras_switch_en_gpio)) {
+		dev_dbg(card->dev, "%s: ras_switch_en_gpio request %d\n", __func__,
+			ras_switch_en_gpio);
+		ret = gpio_request(ras_switch_en_gpio, "ras_switch_en");
+		if (ret) {
+			dev_err(card->dev,
+				"%s: ras_switch_en_gpio request failed, ret:%d\n",
+				__func__, ret);
+			goto err;
+		}
+		gpio_direction_output(ras_switch_en_gpio, 0);
+	}
+	if (gpio_is_valid(ras_switch_sel_gpio)) {
+		dev_dbg(card->dev, "%s: ras_switch_sel_gpio request %d\n", __func__,
+			ras_switch_sel_gpio);
+		ret = gpio_request(ras_switch_sel_gpio, "ras_switch_sel");
+		if (ret) {
+			dev_err(card->dev,
+				"%s: ras_switch_sel_gpio request failed, ret:%d\n",
+				__func__, ret);
+			goto err;
+		}
+		gpio_direction_output(ras_switch_sel_gpio, 0);
+	}
+
+err:
+	return ret;
+}
+#endif
+
 static int msm_audrx_stub_init(struct snd_soc_pcm_runtime *rtd)
 {
 	int ret = 0;
@@ -8786,7 +8925,7 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 {
 	struct snd_soc_card *card = NULL;
 	struct snd_soc_dai_link *dailink;
-	int len_1, len_2, len_3, len_4, len3_t;
+	int len_1, len_2, len_3, len_4;
 	int total_links;
 	const struct of_device_id *match;
 
@@ -8802,8 +8941,7 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 		len_1 = ARRAY_SIZE(msm_common_dai_links);
 		len_2 = len_1 + ARRAY_SIZE(msm_tasha_fe_dai_links);
 		len_3 = len_2 + ARRAY_SIZE(msm_common_misc_fe_dai_links);
-		len3_t = len_3 + ARRAY_SIZE(msm_ext_common_fe_dai);
-		len_4 = len3_t + ARRAY_SIZE(msm_common_be_dai_links);
+		len_4 = len_3 + ARRAY_SIZE(msm_common_be_dai_links);
 		total_links = len_4 + ARRAY_SIZE(msm_tasha_be_dai_links);
 		memcpy(msm_tasha_dai_links,
 		       msm_common_dai_links,
@@ -8815,9 +8953,6 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 		       msm_common_misc_fe_dai_links,
 		       sizeof(msm_common_misc_fe_dai_links));
 		memcpy(msm_tasha_dai_links + len_3,
-		       msm_ext_common_fe_dai,
-		       sizeof(msm_ext_common_fe_dai));
-		memcpy(msm_tasha_dai_links + len3_t,
 		       msm_common_be_dai_links,
 		       sizeof(msm_common_be_dai_links));
 		memcpy(msm_tasha_dai_links + len_4,
@@ -8848,6 +8983,24 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 			       msm_mi2s_be_dai_links,
 			       sizeof(msm_mi2s_be_dai_links));
 			total_links += ARRAY_SIZE(msm_mi2s_be_dai_links);
+
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+			if (get_hw_version_platform() == HARDWARE_PLATFORM_SAGIT) {
+				memcpy(msm_tasha_dai_links + total_links,
+				       msm_quat_mi2s_tfa98xx_dai_links,
+				       sizeof(msm_quat_mi2s_tfa98xx_dai_links));
+			} else if ((get_hw_version_platform() == HARDWARE_PLATFORM_CHIRON) ||
+				   (get_hw_version_platform() == HARDWARE_PLATFORM_CHIRON_S)) {
+				memcpy(msm_tasha_dai_links + total_links,
+				       msm_quat_mi2s_tas2559_dai_links,
+				       sizeof(msm_quat_mi2s_tas2559_dai_links));
+			} else {
+				memcpy(msm_tasha_dai_links + total_links,
+				       msm_quat_mi2s_stub_dai_links,
+				       sizeof(msm_quat_mi2s_stub_dai_links));
+			}
+			total_links += ARRAY_SIZE(msm_quat_mi2s_stub_dai_links);
+#endif
 		}
 		if (of_property_read_bool(dev->of_node,
 					  "qcom,auxpcm-audio-intf")) {
@@ -8855,14 +9008,6 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 			       msm_auxpcm_be_dai_links,
 			       sizeof(msm_auxpcm_be_dai_links));
 			total_links += ARRAY_SIZE(msm_auxpcm_be_dai_links);
-		}
-		if (of_property_read_bool(dev->of_node,
-					  "qcom,tdm-tx-group-enable")) {
-			dev_dbg(dev, "%s(): TDM Tx group enable\n", __func__);
-			memcpy(msm_tasha_dai_links + total_links,
-			       msm_ext_tdm_tx_group_be_dai,
-			       sizeof(msm_ext_tdm_tx_group_be_dai));
-			total_links += ARRAY_SIZE(msm_ext_tdm_tx_group_be_dai);
 		}
 		dailink = msm_tasha_dai_links;
 	}  else if (!strcmp(match->data, "tavil_codec")) {
@@ -8912,6 +9057,13 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 			       msm_mi2s_be_dai_links,
 			       sizeof(msm_mi2s_be_dai_links));
 			total_links += ARRAY_SIZE(msm_mi2s_be_dai_links);
+
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+			memcpy(msm_tavil_dai_links + total_links,
+			       msm_quat_mi2s_stub_dai_links,
+			       sizeof(msm_quat_mi2s_stub_dai_links));
+			total_links += ARRAY_SIZE(msm_quat_mi2s_stub_dai_links);
+#endif
 		}
 		if (of_property_read_bool(dev->of_node,
 					  "qcom,auxpcm-audio-intf")) {
@@ -9021,7 +9173,7 @@ static int msm_init_wsa_dev(struct platform_device *pdev,
 		goto err_dt;
 	}
 	if (wsa_max_devs == 0) {
-		dev_warn(&pdev->dev,
+		dev_dbg(&pdev->dev,
 			 "%s: Max WSA devices is 0 for this target?\n",
 			 __func__);
 		goto err_dt;
@@ -9410,6 +9562,36 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 		dev_dbg(&pdev->dev, "msm_prepare_us_euro failed (%d)\n",
 			ret);
 
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+	pdata->spk_id_gpio_p = of_parse_phandle(pdev->dev.of_node,
+					"qcom,spk-id-pin", 0);
+	if (!pdata->spk_id_gpio_p)
+		dev_dbg(&pdev->dev, "property %s not detected in node %s",
+			"qcom,spk-id-pin", pdev->dev.of_node->full_name);
+	pdata->rcv_id_gpio_p = of_parse_phandle(pdev->dev.of_node,
+					"qcom,rcv-id-pin", 0);
+	if (!pdata->rcv_id_gpio_p)
+		dev_dbg(&pdev->dev, "property %s not detected in node %s",
+			"qcom,rcv-id-pin", pdev->dev.of_node->full_name);
+
+	ras_switch_en_gpio = of_get_named_gpio(pdev->dev.of_node,
+				"qcom,ras-switch-en", 0);
+	if (ras_switch_en_gpio < 0) {
+		dev_dbg(&pdev->dev, "%s: %s property not found %d\n",
+			__func__, "qcom,ras-switch-en", ras_switch_en_gpio);
+	}
+	ras_switch_sel_gpio = of_get_named_gpio(pdev->dev.of_node,
+				"qcom,ras-switch-sel", 0);
+	if (ras_switch_sel_gpio < 0) {
+		dev_dbg(&pdev->dev, "%s: %s property not found %d\n",
+			__func__, "qcom,ras-switch-sel", ras_switch_sel_gpio);
+	}
+
+	ret = msm_prepare_ras_switch(card);
+	if (ret)
+		dev_info(&pdev->dev, "msm_prepare_ras_switch failed (%d)\n", ret);
+#endif
+
 	/* Parse pinctrl info from devicetree */
 	ret = msm_get_pinctrl(pdev);
 	if (!ret) {
@@ -9430,6 +9612,22 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 		pr_err("%s: Audio notifier register failed ret = %d\n",
 			__func__, ret);
 
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+	pdata->us_p_power = regulator_get(&pdev->dev, "vreg_pa_p_5p0");
+	if (IS_ERR(pdata->us_p_power)) {
+		dev_info(&pdev->dev, "ultrasound p power can't be found\n");
+		pdata->us_p_power = NULL;
+	}
+
+	pdata->us_n_power = regulator_get(&pdev->dev, "vreg_pa_n_5p0");
+	if (IS_ERR(pdata->us_n_power)) {
+		dev_info(&pdev->dev, "ultrasound n power can't be found\n");
+		pdata->us_n_power = NULL;
+	}
+
+	usbhs_init(pdev);
+#endif
+
 	return 0;
 err:
 	if (pdata->us_euro_gpio > 0) {
@@ -9438,6 +9636,21 @@ err:
 		gpio_free(pdata->us_euro_gpio);
 		pdata->us_euro_gpio = 0;
 	}
+
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+	if (ras_switch_en_gpio > 0) {
+		dev_dbg(&pdev->dev, "%s free ear_switch_en0_gpio %d\n",
+			__func__, ras_switch_en_gpio);
+		gpio_free(ras_switch_en_gpio);
+		ras_switch_en_gpio = 0;
+	}
+	if (ras_switch_sel_gpio > 0) {
+		dev_dbg(&pdev->dev, "%s free ear_switch_en1_gpio %d\n",
+			__func__, ras_switch_sel_gpio);
+		gpio_free(ras_switch_sel_gpio);
+		ras_switch_sel_gpio = 0;
+	}
+#endif
 	msm_release_pinctrl(pdev);
 	devm_kfree(&pdev->dev, pdata);
 	return ret;
@@ -9449,7 +9662,19 @@ static int msm_asoc_machine_remove(struct platform_device *pdev)
 	struct msm_asoc_mach_data *pdata =
 				snd_soc_card_get_drvdata(card);
 
-	gpio_free(pdata->us_euro_gpio);
+#ifdef CONFIG_MACH_XIAOMI_MSM8998
+	usbhs_deinit();
+
+	if (pdata->us_p_power)
+		regulator_put(pdata->us_p_power);
+	if (pdata->us_n_power)
+		regulator_put(pdata->us_n_power);
+#endif
+
+	if (pdata->us_euro_gpio > 0) {
+		gpio_free(pdata->us_euro_gpio);
+		pdata->us_euro_gpio = 0;
+	}
 	i2s_auxpcm_deinit();
 
 	snd_soc_unregister_card(card);
